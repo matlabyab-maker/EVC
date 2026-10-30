@@ -3,7 +3,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="#07142F"
-    android:padding="8dp">
+    android:padding="5dp">
 
     <TextView
         android:layout_width="match_parent"
@@ -24,11 +24,11 @@
         android:textColor="#B9D7FF"
         android:textSize="12sp"
         android:gravity="center"
-        android:paddingBottom="5dp" />
+        android:paddingBottom="2dp" />
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="190dp"
+        android:layout_height="165dp"
         android:background="#000000">
         <VideoView
             android:id="@+id/videoView"
@@ -52,8 +52,8 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:paddingTop="4dp"
-        android:paddingBottom="2dp">
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp">
         <Button
             android:id="@+id/timeModeButton"
             android:layout_width="0dp"
@@ -80,8 +80,8 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp">
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp">
         <TextView
             android:id="@+id/selectionText"
             android:layout_width="0dp"
@@ -125,10 +125,20 @@
     </ScrollView>
 
     <Button
+        android:id="@+id/exportButton"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:layout_marginTop="1dp"
+        android:text="خروجی تصاویر انتخاب‌شده"
+        android:textColor="#07142F"
+        android:textStyle="bold"
+        android:backgroundTint="#43D9A3" />
+
+    <Button
         android:id="@+id/openButton"
         android:layout_width="match_parent"
         android:layout_height="48dp"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="2dp"
         android:text="انتخاب ویدیو"
         android:textColor="#07142F"
         android:textStyle="bold"

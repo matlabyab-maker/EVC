@@ -5,6 +5,9 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.content.ContentValues
+import android.os.Environment
+import android.provider.MediaStore
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
@@ -24,8 +27,8 @@ import android.widget.TextView
 import android.widget.Toast
 import android.widget.VideoView
 import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.objects.ObjectDetection
-import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
+import com.google.mlkit.vision.pose.PoseDetection
+import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
 import java.util.concurrent.Executors
 import kotlin.math.max
 
@@ -50,12 +53,11 @@ class MainActivity : Activity() {
     private var humanDetectionRunning = false
     private var showingHumanOnly = false
 
-    private val personDetector by lazy {
-        val options = ObjectDetectorOptions.Builder()
-            .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
-            .enableClassification()
+    private val poseDetector by lazy {
+        val options = PoseDetectorOptions.Builder()
+            .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE)
             .build()
-        ObjectDetection.getClient(options)
+        PoseDetection.getClient(options)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,6 +78,7 @@ class MainActivity : Activity() {
             updateSelectionText()
         }
         findViewById<Button>(R.id.deleteSelectedButton).setOnClickListener { deleteSelectedStoryboardFrames() }
+        findViewById<Button>(R.id.exportButton).setOnClickListener { exportSelectedFrames() }
         timeModeButton.setOnClickListener { showTimeMode() }
         humanModeButton.setOnClickListener { showHumanMode() }
 
@@ -138,7 +141,7 @@ class MainActivity : Activity() {
             val rowLabel = TextView(this).apply {
                 text = "ردیف ${row + 1} • فریم‌های ${row * FRAMES_PER_ROW + 1} تا ${(row + 1) * FRAMES_PER_ROW}"
                 setTextColor(Color.rgb(185, 215, 255)); textSize = 11f
-                setPadding(dp(4), dp(3), dp(4), dp(3))
+                setPadding(dp(3), dp(1), dp(3), dp(1))
             }
             storyboardRows.addView(rowLabel)
             val horizontal = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
@@ -147,7 +150,7 @@ class MainActivity : Activity() {
                 val index = row * FRAMES_PER_ROW + col
                 if (index in deletedStoryboardFrames) continue
                 val cell = makeFrameCell(index, null, "${index + 1}")
-                strip.addView(cell, LinearLayout.LayoutParams(dp(74), dp(56)).apply { setMargins(dp(2), dp(1), dp(2), dp(4)) })
+                strip.addView(cell, LinearLayout.LayoutParams(dp(74), dp(56)).apply { setMargins(dp(1), 0, dp(1), dp(1)) })
                 frameViews[index] = cell
             }
             horizontal.addView(strip)
@@ -220,10 +223,27 @@ class MainActivity : Activity() {
                     if (generation != storyboardGeneration) break
                     if (index in deletedStoryboardFrames) continue
                     val timestampMs = if (count <= 1) 0L else duration * index / (count - 1)
-                    val bitmap = try { retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST) } catch (_: Exception) { null }
+                    // Some containers/codecs return null for an exact sampled timestamp.
+                    // Retry nearby timestamps and a key-frame lookup before leaving a blank cell.
+                    var bitmap: Bitmap? = null
+                    val candidatesUs = listOf(
+                        timestampMs * 1000L,
+                        max(0L, timestampMs - 500L) * 1000L,
+                        (timestampMs + 500L).coerceAtMost(duration.coerceAtLeast(timestampMs)) * 1000L,
+                        max(0L, timestampMs - 1500L) * 1000L,
+                        (timestampMs + 1500L).coerceAtMost(duration.coerceAtLeast(timestampMs)) * 1000L
+                    ).distinct()
+                    for (candidateUs in candidatesUs) {
+                        bitmap = try { retriever.getFrameAtTime(candidateUs, MediaMetadataRetriever.OPTION_CLOSEST) } catch (_: Exception) { null }
+                        if (bitmap != null) break
+                    }
+                    if (bitmap == null) {
+                        bitmap = try { retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) } catch (_: Exception) { null }
+                    }
                     if (bitmap != null) {
-                        val scaled = Bitmap.createScaledBitmap(bitmap, 220, 132, true)
-                        if (scaled !== bitmap) bitmap.recycle()
+                        val sourceBitmap = bitmap
+                        val scaled = Bitmap.createScaledBitmap(sourceBitmap, 220, 132, true)
+                        if (scaled !== sourceBitmap) sourceBitmap.recycle()
                         mainHandler.post {
                             if (generation == storyboardGeneration) {
                                 frameBitmaps[index] = scaled
@@ -294,10 +314,10 @@ class MainActivity : Activity() {
             return
         }
         val input = InputImage.fromBitmap(bitmap, 0)
-        personDetector.process(input)
-            .addOnSuccessListener { objects ->
-                val hasPerson = objects.any { obj -> obj.labels.any { label -> label.text.equals("person", ignoreCase = true) } }
-                if (hasPerson) humanFrames.add(index)
+        poseDetector.process(input)
+            .addOnSuccessListener { pose ->
+                // Pose detection identifies a person when enough body landmarks are present.
+                if (pose.allPoseLandmarks.size >= 5) humanFrames.add(index)
             }
             .addOnFailureListener { /* Skip uncertain frame and continue. */ }
             .addOnCompleteListener {
@@ -323,6 +343,45 @@ class MainActivity : Activity() {
         updateSelectionText()
         statusText.text = "${toDelete.size} فریم از استوری‌بورد حذف شد"
         Toast.makeText(this, "فریم‌ها از استوری‌بورد حذف شدند؛ فایل ویدیوی اصلی تغییر نکرده است", Toast.LENGTH_LONG).show()
+    }
+
+
+    private fun exportSelectedFrames() {
+        val indices = selectedFrames.toList().sorted()
+        if (indices.isEmpty()) {
+            Toast.makeText(this, "ابتدا فریم‌هایی را برای خروجی انتخاب کنید", Toast.LENGTH_SHORT).show()
+            return
+        }
+        worker.execute {
+            var saved = 0
+            for (index in indices) {
+                val bitmap = frameBitmaps[index] ?: continue
+                if (bitmap.isRecycled) continue
+                try {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, String.format("EVC_frame_%03d.jpg", index + 1))
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                        if (android.os.Build.VERSION.SDK_INT >= 29) {
+                            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/EVC")
+                            put(MediaStore.Images.Media.IS_PENDING, 1)
+                        }
+                    }
+                    val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: continue
+                    val ok = contentResolver.openOutputStream(uri)?.use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out) } ?: false
+                    if (ok) {
+                        if (android.os.Build.VERSION.SDK_INT >= 29) {
+                            val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+                            contentResolver.update(uri, done, null, null)
+                        }
+                        saved++
+                    } else contentResolver.delete(uri, null, null)
+                } catch (_: Exception) { }
+            }
+            mainHandler.post {
+                Toast.makeText(this, if (saved > 0) "$saved تصویر در Pictures/EVC ذخیره شد" else "ذخیرهٔ تصاویر ناموفق بود", Toast.LENGTH_LONG).show()
+                statusText.text = if (saved > 0) "خروجی تصاویر آماده است: $saved فایل در Pictures/EVC" else "خروجی تصاویر ساخته نشد"
+            }
+        }
     }
 
     private fun updateModeButtons() {
@@ -357,7 +416,7 @@ class MainActivity : Activity() {
         storyboardGeneration++
         worker.shutdownNow()
         frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
-        try { personDetector.close() } catch (_: Exception) { }
+        try { poseDetector.close() } catch (_: Exception) { }
         super.onDestroy()
     }
     companion object {

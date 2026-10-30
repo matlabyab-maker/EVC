@@ -11,8 +11,20 @@ android {
         applicationId = "com.evc.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.2.4"
+    }
+
+    buildTypes {
+        getByName("debug") {
+            // Keep the CI-produced debug APK installable while shrinking unused code/resources.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
 
     compileOptions {
@@ -23,5 +35,5 @@ android {
 }
 
 dependencies {
-    implementation("com.google.mlkit:object-detection:17.0.2")
+    implementation("com.google.mlkit:pose-detection:18.0.0")
 }
