@@ -1,0 +1,67 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#07142F"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="EVC"
+        android:textColor="#FFFFFF"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:paddingTop="8dp"
+        android:paddingBottom="4dp" />
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="یک ویدیو انتخاب کنید"
+        android:textColor="#B9D7FF"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:paddingBottom="12dp" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#000000">
+        <VideoView
+            android:id="@+id/videoView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+        <TextView
+            android:id="@+id/emptyHint"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:text="▶
+
+پخش‌کنندهٔ EVC"
+            android:textColor="#D7E7FF"
+            android:textSize="22sp"
+            android:gravity="center"
+            android:background="#101F3D" />
+    </FrameLayout>
+
+    <Button
+        android:id="@+id/openButton"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="16dp"
+        android:text="انتخاب ویدیو"
+        android:textColor="#07142F"
+        android:textStyle="bold"
+        android:backgroundTint="#FFD21F" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="نسخهٔ اول: انتخاب و پخش ویدیو"
+        android:textColor="#7F9FC9"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:paddingTop="10dp" />
+</LinearLayout>
