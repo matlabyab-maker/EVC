@@ -9,6 +9,10 @@ import android.content.ContentValues
 import android.os.Environment
 import android.provider.MediaStore
 import android.media.MediaMetadataRetriever
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
+import android.media.MediaCodec
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -30,6 +34,8 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.pose.PoseDetection
 import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
 import java.util.concurrent.Executors
+import java.io.File
+import java.io.FileInputStream
 import kotlin.math.max
 
 class MainActivity : Activity() {
@@ -78,7 +84,7 @@ class MainActivity : Activity() {
             updateSelectionText()
         }
         findViewById<Button>(R.id.deleteSelectedButton).setOnClickListener { deleteSelectedStoryboardFrames() }
-        findViewById<Button>(R.id.exportButton).setOnClickListener { exportSelectedFrames() }
+        findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo() }
         timeModeButton.setOnClickListener { showTimeMode() }
         humanModeButton.setOnClickListener { showHumanMode() }
 
@@ -141,7 +147,7 @@ class MainActivity : Activity() {
             val rowLabel = TextView(this).apply {
                 text = "ردیف ${row + 1} • فریم‌های ${row * FRAMES_PER_ROW + 1} تا ${(row + 1) * FRAMES_PER_ROW}"
                 setTextColor(Color.rgb(185, 215, 255)); textSize = 11f
-                setPadding(dp(3), dp(1), dp(3), dp(1))
+                setPadding(dp(2), 0, dp(2), 0)
             }
             storyboardRows.addView(rowLabel)
             val horizontal = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
@@ -150,7 +156,7 @@ class MainActivity : Activity() {
                 val index = row * FRAMES_PER_ROW + col
                 if (index in deletedStoryboardFrames) continue
                 val cell = makeFrameCell(index, null, "${index + 1}")
-                strip.addView(cell, LinearLayout.LayoutParams(dp(74), dp(56)).apply { setMargins(dp(1), 0, dp(1), dp(1)) })
+                strip.addView(cell, LinearLayout.LayoutParams(dp(74), dp(56)).apply { setMargins(0, 0, 0, 0) })
                 frameViews[index] = cell
             }
             horizontal.addView(strip)
@@ -341,47 +347,164 @@ class MainActivity : Activity() {
         }
         selectedFrames.clear()
         updateSelectionText()
-        statusText.text = "${toDelete.size} فریم از استوری‌بورد حذف شد"
-        Toast.makeText(this, "فریم‌ها از استوری‌بورد حذف شدند؛ فایل ویدیوی اصلی تغییر نکرده است", Toast.LENGTH_LONG).show()
+        statusText.text = "${toDelete.size} بازهٔ زمانی برای حذف از خروجی علامت‌گذاری شد"
+        Toast.makeText(this, "بازه‌های زمانی این اسلایدها از ویدیوی خروجی حذف می‌شوند؛ فایل اصلی دست‌نخورده می‌ماند", Toast.LENGTH_LONG).show()
     }
 
 
-    private fun exportSelectedFrames() {
-        val indices = selectedFrames.toList().sorted()
-        if (indices.isEmpty()) {
-            Toast.makeText(this, "ابتدا فریم‌هایی را برای خروجی انتخاب کنید", Toast.LENGTH_SHORT).show()
+    private fun exportRemainingVideo() {
+        val source = selectedUri
+        if (source == null || videoDurationMs <= 0L) {
+            Toast.makeText(this, "ابتدا یک ویدیوی معتبر انتخاب کنید", Toast.LENGTH_SHORT).show()
             return
         }
+        val total = ROWS * FRAMES_PER_ROW
+        val kept = (0 until total).filter { it !in deletedStoryboardFrames }
+        if (kept.isEmpty()) {
+            Toast.makeText(this, "همهٔ بازه‌ها حذف شده‌اند؛ چیزی برای خروجی باقی نمانده است", Toast.LENGTH_LONG).show()
+            return
+        }
+        // Current version exports the remaining intervals without re-encoding.
+        // The target-size/re-encoding mode will be added separately to avoid silently
+        // changing codec or quality in the original-quality mode.
+        statusText.text = "در حال ساخت ویدیوی خروجی از بازه‌های باقی‌مانده…"
+        findViewById<Button>(R.id.exportButton).isEnabled = false
         worker.execute {
-            var saved = 0
-            for (index in indices) {
-                val bitmap = frameBitmaps[index] ?: continue
-                if (bitmap.isRecycled) continue
-                try {
-                    val values = ContentValues().apply {
-                        put(MediaStore.Images.Media.DISPLAY_NAME, String.format("EVC_frame_%03d.jpg", index + 1))
-                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                        if (android.os.Build.VERSION.SDK_INT >= 29) {
-                            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/EVC")
-                            put(MediaStore.Images.Media.IS_PENDING, 1)
-                        }
+            var result: File? = null
+            var error: String? = null
+            try {
+                val ranges = mutableListOf<Pair<Long, Long>>()
+                var runStart: Int? = null
+                for (i in 0 until total) {
+                    val isKept = i !in deletedStoryboardFrames
+                    if (isKept && runStart == null) runStart = i
+                    if ((!isKept || i == total - 1) && runStart != null) {
+                        val endIndex = if (isKept && i == total - 1) i + 1 else i
+                        val startMs = videoDurationMs * runStart!! / total
+                        val endMs = videoDurationMs * endIndex / total
+                        if (endMs > startMs) ranges.add(startMs to endMs)
+                        runStart = null
                     }
-                    val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: continue
-                    val ok = contentResolver.openOutputStream(uri)?.use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out) } ?: false
-                    if (ok) {
-                        if (android.os.Build.VERSION.SDK_INT >= 29) {
-                            val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
-                            contentResolver.update(uri, done, null, null)
-                        }
-                        saved++
-                    } else contentResolver.delete(uri, null, null)
-                } catch (_: Exception) { }
+                }
+                result = muxRemainingRanges(source, ranges)
+            } catch (e: Exception) {
+                error = e.message ?: e.javaClass.simpleName
             }
             mainHandler.post {
-                Toast.makeText(this, if (saved > 0) "$saved تصویر در Pictures/EVC ذخیره شد" else "ذخیرهٔ تصاویر ناموفق بود", Toast.LENGTH_LONG).show()
-                statusText.text = if (saved > 0) "خروجی تصاویر آماده است: $saved فایل در Pictures/EVC" else "خروجی تصاویر ساخته نشد"
+                findViewById<Button>(R.id.exportButton).isEnabled = true
+                val file = result
+                if (file != null && file.exists() && file.length() > 0L) {
+                    try {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_edited_${System.currentTimeMillis()}.mp4")
+                            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
+                                put(MediaStore.Video.Media.IS_PENDING, 1)
+                            }
+                        }
+                        val outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                        if (outUri == null) throw IllegalStateException("ساخت فایل در پوشهٔ Movies/EVC ممکن نشد")
+                        contentResolver.openOutputStream(outUri)?.use { out -> FileInputStream(file).use { input -> input.copyTo(out) } }
+                            ?: throw IllegalStateException("نوشتن فایل خروجی ناموفق بود")
+                        if (android.os.Build.VERSION.SDK_INT >= 29) {
+                            val done = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
+                            contentResolver.update(outUri, done, null, null)
+                        }
+                        file.delete()
+                        statusText.text = "ویدیوی خروجی در Movies/EVC ذخیره شد (بدون رمزگذاری مجدد)"
+                        Toast.makeText(this, "ویدیوی خروجی در پوشهٔ Movies/EVC ذخیره شد", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        statusText.text = "انتقال خروجی به پوشهٔ ویدیوها ناموفق بود: ${e.message ?: "خطا"}"
+                        Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    statusText.text = "ساخت ویدیوی خروجی ناموفق بود: ${error ?: "فرمت یا برش پشتیبانی نشد"}"
+                    Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+                }
             }
         }
+    }
+
+    /** Muxes kept time ranges from the source without decoding/re-encoding. */
+    private fun muxRemainingRanges(source: Uri, ranges: List<Pair<Long, Long>>): File {
+        val probe = MediaExtractor()
+        probe.setDataSource(this, source, null)
+        val videoTrack = (0 until probe.trackCount).firstOrNull {
+            probe.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+        } ?: throw IllegalStateException("ترک ویدیویی پیدا نشد")
+        val output = File(cacheDir, "evc_export_${System.currentTimeMillis()}.mp4")
+        val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val trackMap = mutableMapOf<Int, Int>()
+        for (i in 0 until probe.trackCount) {
+            val format = probe.getTrackFormat(i)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+            if (mime.startsWith("video/") || mime.startsWith("audio/")) {
+                trackMap[i] = muxer.addTrack(format)
+                probe.selectTrack(i)
+            }
+        }
+        if (trackMap.isEmpty()) {
+            probe.release(); muxer.release()
+            throw IllegalStateException("ترک قابل خروجی پیدا نشد")
+        }
+        muxer.start()
+        val buffer = java.nio.ByteBuffer.allocate(8 * 1024 * 1024)
+        val info = MediaCodec.BufferInfo()
+        var outputBaseUs = 0L
+        try {
+            for ((requestedStartMs, requestedEndMs) in ranges) {
+                if (requestedEndMs <= requestedStartMs) continue
+                // Use the next video sync sample so every exported segment starts on a
+                // decodable key frame. This can trim a small amount at a cut boundary.
+                val syncProbe = MediaExtractor()
+                syncProbe.setDataSource(this, source, null)
+                syncProbe.selectTrack(videoTrack)
+                syncProbe.seekTo(requestedStartMs * 1000L, MediaExtractor.SEEK_TO_NEXT_SYNC)
+                val actualStartUs = if (syncProbe.sampleTrackIndex >= 0) syncProbe.sampleTime else -1L
+                syncProbe.release()
+                if (actualStartUs < 0L || actualStartUs >= requestedEndMs * 1000L) continue
+                probe.seekTo(actualStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                // Align the muxer's segment start to the video sync timestamp selected above.
+                var segmentFirstVideoUs: Long? = null
+                val pending = mutableListOf<Triple<Int, Long, Pair<ByteArray, Int>>>()
+                while (probe.sampleTrackIndex >= 0) {
+                    val track = probe.sampleTrackIndex
+                    val pts = probe.sampleTime
+                    if (pts >= requestedEndMs * 1000L) break
+                    if (track in trackMap && pts >= actualStartUs) {
+                        if (track == videoTrack && segmentFirstVideoUs == null) segmentFirstVideoUs = pts
+                        buffer.clear()
+                        val size = probe.readSampleData(buffer, 0)
+                        if (size > 0) {
+                            val bytes = ByteArray(size)
+                            buffer.position(0); buffer.get(bytes, 0, size)
+                            pending.add(Triple(track, pts, bytes to probe.sampleFlags))
+                        }
+                    }
+                    if (!probe.advance()) break
+                }
+                val segmentStart = segmentFirstVideoUs ?: actualStartUs
+                for ((track, pts, sample) in pending) {
+                    val bytes = sample.first
+                    val flags = sample.second
+                    buffer.clear(); buffer.put(bytes); buffer.flip()
+                    info.set(0, bytes.size, outputBaseUs + (pts - segmentStart).coerceAtLeast(0L), flags)
+                    muxer.writeSampleData(trackMap.getValue(track), buffer, info)
+                }
+                val segmentDuration = (requestedEndMs * 1000L - segmentStart).coerceAtLeast(1L)
+                outputBaseUs += segmentDuration
+            }
+        } finally {
+            try { muxer.stop() } catch (_: Exception) { }
+            muxer.release()
+            probe.release()
+        }
+        if (!output.exists() || output.length() == 0L) {
+            output.delete()
+            throw IllegalStateException("هیچ بازهٔ قابل‌خروجی باقی نماند؛ شاید برش‌های این کدک با حفظ کدک پشتیبانی نشوند")
+        }
+        return output
     }
 
     private fun updateModeButtons() {
@@ -421,7 +544,7 @@ class MainActivity : Activity() {
     }
     companion object {
         private const val REQUEST_VIDEO = 2101
-        private const val ROWS = 6
+        private const val ROWS = 8
         private const val FRAMES_PER_ROW = 15
     }
 }
