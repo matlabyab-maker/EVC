@@ -114,7 +114,6 @@ class MainActivity : Activity() {
             storyboardRows.addView(rowLabel)
             val horizontal = HorizontalScrollView(this).apply {
                 isHorizontalScrollBarEnabled = false
-                fillViewport = false
             }
             val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             for (col in 0 until FRAMES_PER_ROW) {
