@@ -23,6 +23,7 @@ import android.view.ViewGroup
 import android.view.MotionEvent
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -205,6 +206,7 @@ class MainActivity : Activity() {
         deletedTimelineRanges.clear()
         selectedTimelineRange = null
         timelineView.setTimeline(0L, emptyList(), emptyList())
+        timelineView.setThumbnails(emptyList())
         selectedFrames.clear()
         frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
         frameBitmaps.clear()
@@ -333,6 +335,10 @@ class MainActivity : Activity() {
                         mainHandler.post {
                             if (generation == storyboardGeneration) {
                                 frameBitmaps[index] = scaled
+                                timelineView.setThumbnails(frameBitmaps.entries.sortedBy { it.key }.map { entry ->
+                                    val sampleTime = if (count <= 1) 0L else duration * entry.key / (count - 1)
+                                    sampleTime to entry.value
+                                })
                                 val cell = frameViews[index]
                                 val image = cell?.getChildAt(0) as? ImageView
                                 image?.setImageBitmap(scaled)
@@ -777,6 +783,7 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
     private var durationMs = 0L
     private var splitPoints = listOf<Long>()
     private var deletedRanges = listOf<Pair<Long, Long>>()
+    private var thumbnails: List<Pair<Long, Bitmap>> = emptyList()
     private var zoom = 1f
     private var windowStartMs = 0L
     private var lastX = 0f
@@ -793,6 +800,10 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
         splitPoints = cuts.sorted()
         deletedRanges = deleted.toList()
         windowStartMs = windowStartMs.coerceIn(0L, max(0L, durationMs - visibleDuration()))
+        invalidate()
+    }
+    fun setThumbnails(frames: List<Pair<Long, Bitmap>>) {
+        thumbnails = frames.filter { !it.second.isRecycled }.sortedBy { it.first }
         invalidate()
     }
     fun setPlayhead(timeMs: Long) { playheadMs = timeMs.coerceIn(0L, durationMs); invalidate() }
@@ -815,6 +826,25 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
             canvas.drawText("نوار زمان پس از انتخاب ویدیو آماده می‌شود", left, height * .58f, paint); return
         }
         val start = windowStartMs; val end = minOf(durationMs, start + visibleDuration())
+        // Render extracted video frames as one continuous thumbnail strip across the timeline.
+        if (thumbnails.isNotEmpty()) {
+            val save = canvas.save()
+            canvas.clipRect(left, top, right, bottom)
+            val visibleFrames = thumbnails.filter { it.first >= start && it.first <= end }
+            visibleFrames.forEachIndexed { index, frame ->
+                val centerX = xAt(frame.first)
+                val prevX = if (index == 0) left else (xAt(visibleFrames[index - 1].first) + centerX) / 2f
+                val nextX = if (index == visibleFrames.lastIndex) right else (centerX + xAt(visibleFrames[index + 1].first)) / 2f
+                val dst = RectF(max(left, prevX), top, minOf(right, nextX), bottom)
+                if (dst.width() > 0f) {
+                    paint.color = Color.WHITE
+                    canvas.drawBitmap(frame.second, null, dst, paint)
+                }
+            }
+            canvas.restoreToCount(save)
+            paint.color = Color.argb(70, 8, 17, 32)
+            canvas.drawRoundRect(left, top, right, bottom, 5f * density, 5f * density, paint)
+        }
         deletedRanges.forEach { r ->
             if (r.second >= start && r.first <= end) {
                 paint.color = Color.rgb(181, 44, 69)
