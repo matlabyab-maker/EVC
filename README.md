@@ -15,3 +15,10 @@ No `.git` directory is included: initialize a fresh repository for EVC so the ol
 
 ## Scope of this first version
 This version does not cut video yet. The only app capability is selecting and playing a video. Build and device playback still need verification in GitHub Actions / on the target device.
+
+
+## v0.2.2 storyboard fixes
+- Fixes the cleared frame-view map so extracted thumbnails are attached to visible cells.
+- Uses a visible yellow foreground border and check badge for selected frames.
+- Adds time-based view and on-device ML Kit person-detection view.
+- Adds removal of selected cards from the storyboard. This removes storyboard cards only; it does not modify/export the source video yet.

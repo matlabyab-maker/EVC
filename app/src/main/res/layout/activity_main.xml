@@ -51,8 +51,36 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingTop="4dp"
+        android:paddingBottom="2dp">
+        <Button
+            android:id="@+id/timeModeButton"
+            android:layout_width="0dp"
+            android:layout_height="38dp"
+            android:layout_weight="1"
+            android:text="نمایش زمانی"
+            android:textSize="11sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#FFD21F" />
+        <Button
+            android:id="@+id/humanModeButton"
+            android:layout_width="0dp"
+            android:layout_height="38dp"
+            android:layout_weight="1"
+            android:layout_marginStart="5dp"
+            android:text="صحنه‌های انسانی"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#25456F" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="5dp"
+        android:paddingTop="3dp"
         android:paddingBottom="3dp">
         <TextView
             android:id="@+id/selectionText"
@@ -67,10 +95,20 @@
             android:layout_width="wrap_content"
             android:layout_height="38dp"
             android:minHeight="0dp"
-            android:text="پاک‌کردن انتخاب"
+            android:text="لغو انتخاب"
             android:textSize="10sp"
             android:textColor="#07142F"
             android:backgroundTint="#FFD21F" />
+        <Button
+            android:id="@+id/deleteSelectedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:layout_marginStart="4dp"
+            android:minHeight="0dp"
+            android:text="حذف فریم‌ها"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#B52C45" />
     </LinearLayout>
 
     <ScrollView
