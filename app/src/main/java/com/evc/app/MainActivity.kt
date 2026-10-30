@@ -799,7 +799,7 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
     private fun visibleDuration(): Long = if (durationMs <= 0L) 1L else (durationMs / zoom).toLong().coerceAtLeast(1L)
     private fun timeAt(x: Float): Long {
         val usable = (width - 16f * density).coerceAtLeast(1f)
-        return (windowStartMs + ((x - 8f * density).coerceIn(0f, usable) / usable * visibleDuration())).coerceIn(0L, durationMs)
+        return (windowStartMs + (((x - 8f * density).coerceIn(0f, usable) / usable) * visibleDuration().toFloat()).toLong()).coerceIn(0L, durationMs)
     }
     private fun xAt(time: Long): Float {
         val usable = (width - 16f * density).coerceAtLeast(1f)
