@@ -304,7 +304,10 @@ class MainActivity : Activity() {
                 mainHandler.post {
                     if (generation != storyboardGeneration) return@post
                     videoDurationMs = duration
-                    statusText.text = if (duration > 0) "مدت ویدیو ${formatTime(duration)} • در حال استخراج ۹۰ فریم…" else "در حال استخراج فریم‌ها…"
+                    // Initialize the timeline with the selected video's duration.
+                    // Without this, TimelineView remains in its empty state and cannot draw thumbnails.
+                    timelineView.setTimeline(duration, timelineSplitPoints.toList(), deletedTimelineRanges)
+                    statusText.text = if (duration > 0) "مدت ویدیو ${formatTime(duration)} • در حال استخراج فریم‌ها…" else "در حال استخراج فریم‌ها…"
                 }
                 val count = ROWS * FRAMES_PER_ROW
                 for (index in 0 until count) {
