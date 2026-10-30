@@ -33,3 +33,27 @@ This version does not cut video yet. The only app capability is selecting and pl
 ## Version 0.2.8
 - Storyboard studio expanded from 6 rows to 8 rows, with 15 frame slots per row (120 sample points total).
 - Reduced vertical row-label padding and removed extra margins between storyboard cells to minimize gaps.
+
+
+## Version 0.2.9
+- Added a Select All button for all storyboard frames that have not been deleted.
+- Updated the selection counter to use the configured storyboard capacity (8 × 15 = 120).
+
+
+## v0.2.11 — Distinct people mode
+- Added an “افراد متفاوت” storyboard mode that selects representative slides containing visually different detected faces.
+- This is a lightweight face-appearance heuristic, not reliable identity recognition; similar faces, angles, lighting, or low resolution may affect grouping.
+
+
+## Version 0.2.12 — Interactive timeline
+- Added a timeline strip above the storyboard rows. Drag with one finger to scrub and seek; pinch with two fingers to zoom the visible time range.
+- Added split-at-playhead, select-a-segment, delete-selected-segment, and restore timeline edits. Deleted timeline segments are combined with storyboard-deleted intervals when preparing the remaining video.
+- The timeline is a lightweight native custom view and adds no new library dependency.
+- Build/test status: not run in this environment because the ZIP does not include a Gradle wrapper and no local Gradle executable was verified.
+
+## Version 0.2.13 — انتخاب هدف اسلایدها
+- Added two explicit storyboard selection modes: «انتخاب اسلاید برای حذف» and «انتخاب اسلاید برای خروجی».
+- In delete mode, selected slides are marked as intervals to exclude from the output; the original source file remains unchanged.
+- In selected-output mode, the output contains only the time intervals represented by selected slides. Unselected intervals and any timeline-deleted ranges are excluded.
+- The export button label changes with the active mode, and the delete action is blocked while selected-output mode is active to reduce accidental operations.
+- Build/test status: not run in this environment because no local Gradle executable or project Gradle wrapper is available; GitHub Actions is configured to build the project.

@@ -20,7 +20,7 @@
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="یک ویدیو انتخاب کنید تا ۹۰ فریم در ۶ ردیف ساخته شود"
+        android:text="یک ویدیو انتخاب کنید تا ۱۲۰ فریم در ۸ ردیف ساخته شود"
         android:textColor="#B9D7FF"
         android:textSize="12sp"
         android:gravity="center"
@@ -73,6 +73,16 @@
             android:textSize="11sp"
             android:textColor="#FFFFFF"
             android:backgroundTint="#25456F" />
+        <Button
+            android:id="@+id/peopleModeButton"
+            android:layout_width="0dp"
+            android:layout_height="38dp"
+            android:layout_weight="1"
+            android:layout_marginStart="5dp"
+            android:text="افراد متفاوت"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#25456F" />
     </LinearLayout>
 
     <LinearLayout
@@ -90,6 +100,16 @@
             android:text="انتخاب‌شده: ۰ فریم از ۹۰"
             android:textColor="#FFD21F"
             android:textSize="11sp" />
+        <Button
+            android:id="@+id/selectAllButton"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:layout_marginEnd="3dp"
+            android:minHeight="0dp"
+            android:text="انتخاب همه"
+            android:textSize="10sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#FFD21F" />
         <Button
             android:id="@+id/clearSelectionButton"
             android:layout_width="wrap_content"
@@ -111,6 +131,85 @@
             android:backgroundTint="#B52C45" />
     </LinearLayout>
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingTop="1dp"
+        android:paddingBottom="2dp">
+        <Button
+            android:id="@+id/selectForDeleteModeButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:text="انتخاب اسلاید برای حذف"
+            android:textSize="11sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#FFD21F" />
+        <Button
+            android:id="@+id/selectForExportModeButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginStart="5dp"
+            android:text="انتخاب اسلاید برای خروجی"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#25456F" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="نوار زمان: کشیدن برای حرکت • دو انگشت برای بزرگ‌نمایی • انتخاب قطعه و برش"
+        android:textColor="#B9D7FF"
+        android:textSize="10sp"
+        android:paddingTop="2dp" />
+
+    <com.evc.app.TimelineView
+        android:id="@+id/timelineView"
+        android:layout_width="match_parent"
+        android:layout_height="58dp"
+        android:background="#10213E" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingTop="1dp"
+        android:paddingBottom="2dp">
+        <Button
+            android:id="@+id/splitTimelineButton"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:text="برش در نشانگر"
+            android:textSize="10sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#FFD21F" />
+        <Button
+            android:id="@+id/deleteTimelineSegmentButton"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="حذف قطعه انتخابی"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#B52C45" />
+        <Button
+            android:id="@+id/restoreTimelineButton"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:layout_marginStart="4dp"
+            android:text="بازگردانی قطعات"
+            android:textSize="9sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#43D9A3" />
+    </LinearLayout>
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -129,7 +228,7 @@
         android:layout_width="match_parent"
         android:layout_height="42dp"
         android:layout_marginTop="1dp"
-        android:text="ساخت ویدیوی خروجی"
+        android:text="ساخت ویدیوی خروجی از باقی‌مانده‌ها"
         android:textColor="#07142F"
         android:textStyle="bold"
         android:backgroundTint="#43D9A3" />

@@ -11,8 +11,8 @@ android {
         applicationId = "com.evc.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.2.8"
+        versionCode = 13
+        versionName = "0.2.13"
     }
 
     buildTypes {
@@ -36,4 +36,5 @@ android {
 
 dependencies {
     implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
+    implementation("com.google.mlkit:face-detection:16.1.7")
 }

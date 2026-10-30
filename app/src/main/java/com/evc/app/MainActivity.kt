@@ -20,6 +20,9 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.MotionEvent
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -33,6 +36,8 @@ import android.widget.VideoView
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.pose.PoseDetection
 import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.util.concurrent.Executors
 import java.io.File
 import java.io.FileInputStream
@@ -46,18 +51,38 @@ class MainActivity : Activity() {
     private lateinit var selectionText: TextView
     private lateinit var timeModeButton: Button
     private lateinit var humanModeButton: Button
+    private lateinit var peopleModeButton: Button
+    private lateinit var selectForDeleteModeButton: Button
+    private lateinit var selectForExportModeButton: Button
+    private var selectingForExport = false
+    private lateinit var timelineView: TimelineView
+    private val timelineSplitPoints = sortedSetOf<Long>()
+    private val deletedTimelineRanges = mutableListOf<Pair<Long, Long>>()
+    private var selectedTimelineRange: Pair<Long, Long>? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val selectedFrames = linkedSetOf<Int>()
     private val frameViews = mutableMapOf<Int, FrameLayout>()
     private val frameBitmaps = mutableMapOf<Int, Bitmap>()
     private val humanFrames = linkedSetOf<Int>()
+    private val distinctPeopleFrames = linkedSetOf<Int>()
+    private var showingDistinctPeople = false
+    private var peopleDetectionRunning = false
     private val deletedStoryboardFrames = linkedSetOf<Int>()
     private var selectedUri: Uri? = null
     private var videoDurationMs = 0L
     private var storyboardGeneration = 0
     private var humanDetectionRunning = false
     private var showingHumanOnly = false
+
+    private val faceDetector by lazy {
+        val options = FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+            .build()
+        FaceDetection.getClient(options)
+    }
 
     private val poseDetector by lazy {
         val options = PoseDetectorOptions.Builder()
@@ -76,17 +101,64 @@ class MainActivity : Activity() {
         selectionText = findViewById(R.id.selectionText)
         timeModeButton = findViewById(R.id.timeModeButton)
         humanModeButton = findViewById(R.id.humanModeButton)
+        peopleModeButton = findViewById(R.id.peopleModeButton)
+        selectForDeleteModeButton = findViewById(R.id.selectForDeleteModeButton)
+        selectForExportModeButton = findViewById(R.id.selectForExportModeButton)
+        timelineView = findViewById(R.id.timelineView)
+        timelineView.onSeek = { timeMs ->
+            try { videoView.seekTo(timeMs.coerceIn(0L, videoDurationMs).toInt()) } catch (_: Exception) { }
+        }
+        timelineView.onSelectRange = { range ->
+            selectedTimelineRange = range
+            statusText.text = "قطعهٔ انتخابی: ${formatTime(range.first)} تا ${formatTime(range.second)}"
+        }
+        findViewById<Button>(R.id.splitTimelineButton).setOnClickListener {
+            if (videoDurationMs <= 0L) { Toast.makeText(this, "ابتدا ویدیو انتخاب کنید", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            if (videoDurationMs < 2L) { Toast.makeText(this, "مدت ویدیو برای برش کافی نیست", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            val at = timelineView.playheadMs.coerceIn(1L, videoDurationMs - 1L)
+            if (timelineSplitPoints.add(at)) {
+                timelineView.setTimeline(videoDurationMs, timelineSplitPoints.toList(), deletedTimelineRanges)
+                selectedTimelineRange = null
+                statusText.text = "برش در ${formatTime(at)} ثبت شد؛ برای انتخاب قطعه روی نوار بزنید"
+            } else Toast.makeText(this, "در این زمان برشی ثبت شده است", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.deleteTimelineSegmentButton).setOnClickListener {
+            val range = selectedTimelineRange
+            if (range == null) { Toast.makeText(this, "ابتدا یک قطعه از نوار زمان را انتخاب کنید", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            if (deletedTimelineRanges.none { it.first == range.first && it.second == range.second }) deletedTimelineRanges.add(range)
+            selectedTimelineRange = null
+            timelineView.setTimeline(videoDurationMs, timelineSplitPoints.toList(), deletedTimelineRanges)
+            statusText.text = "قطعهٔ ${formatTime(range.first)} تا ${formatTime(range.second)} برای حذف از خروجی علامت خورد"
+        }
+        findViewById<Button>(R.id.restoreTimelineButton).setOnClickListener {
+            deletedTimelineRanges.clear(); timelineSplitPoints.clear(); selectedTimelineRange = null
+            timelineView.setTimeline(videoDurationMs, emptyList(), emptyList())
+            statusText.text = "برش‌ها و حذف‌های نوار زمان بازگردانی شدند"
+        }
 
         findViewById<Button>(R.id.openButton).setOnClickListener { chooseVideo() }
+        findViewById<Button>(R.id.selectAllButton).setOnClickListener {
+            if (selectedUri == null || videoDurationMs <= 0L) {
+                Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            selectedFrames.clear()
+            selectedFrames.addAll((0 until ROWS * FRAMES_PER_ROW).filter { it !in deletedStoryboardFrames })
+            refreshSelectionStyles()
+            updateSelectionText()
+        }
         findViewById<Button>(R.id.clearSelectionButton).setOnClickListener {
             selectedFrames.clear()
             refreshSelectionStyles()
             updateSelectionText()
         }
         findViewById<Button>(R.id.deleteSelectedButton).setOnClickListener { deleteSelectedStoryboardFrames() }
-        findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo() }
+        selectForDeleteModeButton.setOnClickListener { setStoryboardSelectionMode(false) }
+        selectForExportModeButton.setOnClickListener { setStoryboardSelectionMode(true) }
+        findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo(selectingForExport) }
         timeModeButton.setOnClickListener { showTimeMode() }
         humanModeButton.setOnClickListener { showHumanMode() }
+        peopleModeButton.setOnClickListener { showDistinctPeopleMode() }
 
         val controller = MediaController(this)
         controller.setAnchorView(videoView)
@@ -104,6 +176,7 @@ class MainActivity : Activity() {
         }
         buildEmptyStoryboard()
         updateModeButtons()
+        updateStoryboardSelectionModeButtons()
     }
 
     private fun chooseVideo() {
@@ -126,6 +199,12 @@ class MainActivity : Activity() {
             if (flags != 0) contentResolver.takePersistableUriPermission(uri, flags)
         } catch (_: Exception) { }
         selectedUri = uri
+        selectingForExport = false
+        selectedForExportButtonReset()
+        timelineSplitPoints.clear()
+        deletedTimelineRanges.clear()
+        selectedTimelineRange = null
+        timelineView.setTimeline(0L, emptyList(), emptyList())
         selectedFrames.clear()
         frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
         frameBitmaps.clear()
@@ -200,6 +279,7 @@ class MainActivity : Activity() {
             refreshCellStyle(index)
             updateSelectionText()
             val timeMs = videoDurationMs * index / (ROWS * FRAMES_PER_ROW - 1)
+            timelineView.setPlayhead(timeMs)
             try { videoView.seekTo(timeMs.toInt()) } catch (_: Exception) { }
         }
         return cell
@@ -276,8 +356,10 @@ class MainActivity : Activity() {
 
     private fun showTimeMode() {
         showingHumanOnly = false
+        showingDistinctPeople = false
         frameViews.forEach { (index, view) -> view.visibility = if (index in deletedStoryboardFrames) View.GONE else View.VISIBLE }
         updateModeButtons()
+        updateStoryboardSelectionModeButtons()
         statusText.text = "نمایش زمانی: فریم‌ها در طول ویدیو با فاصلهٔ زمانی نمونه‌برداری شده‌اند"
     }
 
@@ -287,12 +369,15 @@ class MainActivity : Activity() {
             return
         }
         showingHumanOnly = true
+        showingDistinctPeople = false
         updateModeButtons()
+        updateStoryboardSelectionModeButtons()
         val indices = frameBitmaps.keys.filter { it !in deletedStoryboardFrames }.sorted()
         if (indices.isEmpty()) {
             statusText.text = "ابتدا صبر کنید تا فریم‌ها استخراج شوند"
             showingHumanOnly = false
             updateModeButtons()
+        updateStoryboardSelectionModeButtons()
             return
         }
         if (humanDetectionRunning) return
@@ -332,7 +417,112 @@ class MainActivity : Activity() {
             }
     }
 
+
+    private fun showDistinctPeopleMode() {
+        if (selectedUri == null) {
+            Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_SHORT).show()
+            return
+        }
+        showingDistinctPeople = true
+        showingHumanOnly = false
+        updateModeButtons()
+        updateStoryboardSelectionModeButtons()
+        val indices = frameBitmaps.keys.filter { it !in deletedStoryboardFrames }.sorted()
+        if (indices.isEmpty()) {
+            statusText.text = "ابتدا صبر کنید تا فریم‌ها استخراج شوند"
+            showingDistinctPeople = false
+            updateModeButtons()
+        updateStoryboardSelectionModeButtons()
+            return
+        }
+        if (peopleDetectionRunning) return
+        peopleDetectionRunning = true
+        distinctPeopleFrames.clear()
+        statusText.text = "در حال یافتن چهره‌های متفاوت… 0/${indices.size}"
+        detectDistinctPeopleAt(indices, 0, storyboardGeneration, mutableListOf())
+    }
+
+    // Selects representative frames for visually different detected faces. This is a
+    // lightweight appearance heuristic, not biometric identity recognition.
+    private fun detectDistinctPeopleAt(indices: List<Int>, position: Int, generation: Int, signatures: MutableList<FloatArray>) {
+        if (generation != storyboardGeneration || !showingDistinctPeople) {
+            peopleDetectionRunning = false
+            return
+        }
+        if (position >= indices.size) {
+            peopleDetectionRunning = false
+            frameViews.forEach { (index, view) ->
+                view.visibility = if (index in deletedStoryboardFrames) View.GONE else if (index in distinctPeopleFrames) View.VISIBLE else View.GONE
+            }
+            statusText.text = "پایان بررسی: ${distinctPeopleFrames.size} اسلاید نماینده از چهره‌های متفاوت؛ تشخیص تقریبی است"
+            return
+        }
+        val index = indices[position]
+        val bitmap = frameBitmaps[index]
+        if (bitmap == null || bitmap.isRecycled) {
+            mainHandler.post { detectDistinctPeopleAt(indices, position + 1, generation, signatures) }
+            return
+        }
+        faceDetector.process(InputImage.fromBitmap(bitmap, 0))
+            .addOnSuccessListener { faces ->
+                for (face in faces.sortedByDescending { it.boundingBox.width() * it.boundingBox.height() }) {
+                    val b = face.boundingBox
+                    val left = b.left.coerceIn(0, bitmap.width - 1)
+                    val top = b.top.coerceIn(0, bitmap.height - 1)
+                    val right = b.right.coerceIn(left + 1, bitmap.width)
+                    val bottom = b.bottom.coerceIn(top + 1, bitmap.height)
+                    if ((right - left) < 12 || (bottom - top) < 12) continue
+                    val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+                    val thumb = Bitmap.createScaledBitmap(crop, 12, 12, true)
+                    if (thumb !== crop) crop.recycle()
+                    val sig = FloatArray(144)
+                    var k = 0
+                    for (y in 0 until 12) for (x in 0 until 12) {
+                        val c = thumb.getPixel(x, y)
+                        sig[k++] = (Color.red(c) * 0.299f + Color.green(c) * 0.587f + Color.blue(c) * 0.114f) / 255f
+                    }
+                    thumb.recycle()
+                    val nearest = signatures.minOfOrNull { old -> sig.indices.map { kotlin.math.abs(sig[it] - old[it]) }.average() } ?: 1.0
+                    if (nearest > 0.16) {
+                        signatures.add(sig)
+                        distinctPeopleFrames.add(index)
+                        break
+                    }
+                }
+            }
+            .addOnCompleteListener {
+                statusText.text = "در حال یافتن چهره‌های متفاوت… ${position + 1}/${indices.size}"
+                detectDistinctPeopleAt(indices, position + 1, generation, signatures)
+            }
+    }
+
+    private fun selectedForExportButtonReset() {
+        if (::selectForDeleteModeButton.isInitialized && ::selectForExportModeButton.isInitialized) updateStoryboardSelectionModeButtons()
+        if (findViewById<Button>(R.id.exportButton) != null) findViewById<Button>(R.id.exportButton).text = "ساخت ویدیوی خروجی از باقی‌مانده‌ها"
+    }
+
+    private fun setStoryboardSelectionMode(exportMode: Boolean) {
+        selectingForExport = exportMode
+        selectedFrames.clear()
+        refreshSelectionStyles()
+        updateSelectionText()
+        updateStoryboardSelectionModeButtons()
+        findViewById<Button>(R.id.exportButton).text = if (exportMode) "ساخت خروجی از اسلایدهای انتخاب‌شده" else "ساخت ویدیوی خروجی از باقی‌مانده‌ها"
+        statusText.text = if (exportMode) "حالت خروجی: اسلایدهای موردنظر را انتخاب کنید؛ فقط همان بازه‌ها خروجی می‌شوند" else "حالت حذف: اسلایدهای ناخواسته را انتخاب و سپس «حذف بازه‌ها» را بزنید"
+    }
+
+    private fun updateStoryboardSelectionModeButtons() {
+        selectForDeleteModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(if (!selectingForExport) Color.rgb(255, 210, 31) else Color.rgb(37, 69, 111))
+        selectForDeleteModeButton.setTextColor(if (!selectingForExport) Color.rgb(7, 20, 47) else Color.WHITE)
+        selectForExportModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(if (selectingForExport) Color.rgb(67, 217, 163) else Color.rgb(37, 69, 111))
+        selectForExportModeButton.setTextColor(if (selectingForExport) Color.rgb(7, 20, 47) else Color.WHITE)
+    }
+
     private fun deleteSelectedStoryboardFrames() {
+        if (selectingForExport) {
+            Toast.makeText(this, "اکنون حالت خروجی از انتخاب‌شده‌ها فعال است؛ برای حذف، دکمهٔ «انتخاب برای حذف» را بزنید", Toast.LENGTH_LONG).show()
+            return
+        }
         if (selectedFrames.isEmpty()) {
             Toast.makeText(this, "ابتدا فریم‌هایی را انتخاب کنید", Toast.LENGTH_SHORT).show()
             return
@@ -352,41 +542,61 @@ class MainActivity : Activity() {
     }
 
 
-    private fun exportRemainingVideo() {
+    private fun exportRemainingVideo(onlySelected: Boolean = false) {
         val source = selectedUri
         if (source == null || videoDurationMs <= 0L) {
             Toast.makeText(this, "ابتدا یک ویدیوی معتبر انتخاب کنید", Toast.LENGTH_SHORT).show()
             return
         }
         val total = ROWS * FRAMES_PER_ROW
-        val kept = (0 until total).filter { it !in deletedStoryboardFrames }
+        val requestedFrames = selectedFrames.toSet()
+        if (onlySelected && requestedFrames.isEmpty()) {
+            Toast.makeText(this, "برای این حالت، ابتدا اسلایدهایی را که باید در خروجی باشند انتخاب کنید", Toast.LENGTH_LONG).show()
+            return
+        }
+        val kept = if (onlySelected) requestedFrames.filter { it !in deletedStoryboardFrames } else (0 until total).filter { it !in deletedStoryboardFrames }
         if (kept.isEmpty()) {
-            Toast.makeText(this, "همهٔ بازه‌ها حذف شده‌اند؛ چیزی برای خروجی باقی نمانده است", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, if (onlySelected) "هیچ اسلاید انتخاب‌شدهٔ قابل‌خروجی وجود ندارد" else "همهٔ بازه‌ها حذف شده‌اند؛ چیزی برای خروجی باقی نمانده است", Toast.LENGTH_LONG).show()
             return
         }
         // Current version exports the remaining intervals without re-encoding.
         // The target-size/re-encoding mode will be added separately to avoid silently
         // changing codec or quality in the original-quality mode.
-        statusText.text = "در حال ساخت ویدیوی خروجی از بازه‌های باقی‌مانده…"
+        statusText.text = if (onlySelected) "در حال ساخت خروجی فقط از اسلایدهای انتخاب‌شده…" else "در حال ساخت ویدیوی خروجی از بازه‌های باقی‌مانده…"
         findViewById<Button>(R.id.exportButton).isEnabled = false
         worker.execute {
             var result: File? = null
             var error: String? = null
             try {
-                val ranges = mutableListOf<Pair<Long, Long>>()
+                val excluded = mutableListOf<Pair<Long, Long>>()
                 var runStart: Int? = null
                 for (i in 0 until total) {
-                    val isKept = i !in deletedStoryboardFrames
-                    if (isKept && runStart == null) runStart = i
-                    if ((!isKept || i == total - 1) && runStart != null) {
-                        val endIndex = if (isKept && i == total - 1) i + 1 else i
+                    val shouldExclude = if (onlySelected) i !in requestedFrames || i in deletedStoryboardFrames else i in deletedStoryboardFrames
+                    if (shouldExclude && runStart == null) runStart = i
+                    if ((!shouldExclude || i == total - 1) && runStart != null) {
+                        val endIndex = if (shouldExclude && i == total - 1) i + 1 else i
                         val startMs = videoDurationMs * runStart!! / total
                         val endMs = videoDurationMs * endIndex / total
-                        if (endMs > startMs) ranges.add(startMs to endMs)
+                        if (endMs > startMs) excluded.add(startMs to endMs)
                         runStart = null
                     }
                 }
-                result = muxRemainingRanges(source, ranges)
+                synchronized(deletedTimelineRanges) { excluded.addAll(deletedTimelineRanges) }
+                val mergedExcluded = excluded.sortedBy { it.first }.fold(mutableListOf<Pair<Long, Long>>()) { acc, r ->
+                    if (acc.isNotEmpty() && r.first <= acc.last().second) {
+                        val last = acc.removeAt(acc.lastIndex); acc.add(last.first to max(last.second, r.second))
+                    } else acc.add(r)
+                    acc
+                }
+                val keptRanges = mutableListOf<Pair<Long, Long>>()
+                var cursor = 0L
+                for (r in mergedExcluded) {
+                    val a = r.first.coerceIn(0L, videoDurationMs); val b = r.second.coerceIn(0L, videoDurationMs)
+                    if (a > cursor) keptRanges.add(cursor to a)
+                    cursor = max(cursor, b)
+                }
+                if (cursor < videoDurationMs) keptRanges.add(cursor to videoDurationMs)
+                result = muxRemainingRanges(source, keptRanges)
             } catch (e: Exception) {
                 error = e.message ?: e.javaClass.simpleName
             }
@@ -453,7 +663,8 @@ class MainActivity : Activity() {
         val info = MediaCodec.BufferInfo()
         var outputBaseUs = 0L
         try {
-            for ((requestedStartMs, requestedEndMs) in ranges) {
+            for ((rangeIndex, range) in ranges.withIndex()) {
+                val (requestedStartMs, requestedEndMs) = range
                 if (requestedEndMs <= requestedStartMs) continue
                 // Use the next video sync sample so every exported segment starts on a
                 // decodable key frame. This can trim a small amount at a cut boundary.
@@ -494,6 +705,10 @@ class MainActivity : Activity() {
                 }
                 val segmentDuration = (requestedEndMs * 1000L - segmentStart).coerceAtLeast(1L)
                 outputBaseUs += segmentDuration
+                // Leave a short presentation-time gap where deleted intervals were removed.
+                // This preserves the source codec (no re-encoding); players may hold the
+                // last frame briefly during the gap, making each cut perceptible.
+                if (rangeIndex < ranges.lastIndex) outputBaseUs += CUT_GAP_US
             }
         } finally {
             try { muxer.stop() } catch (_: Exception) { }
@@ -512,6 +727,8 @@ class MainActivity : Activity() {
         timeModeButton.setTextColor(if (!showingHumanOnly) Color.rgb(7, 20, 47) else Color.WHITE)
         humanModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(if (showingHumanOnly) Color.rgb(255, 210, 31) else Color.rgb(37, 69, 111))
         humanModeButton.setTextColor(if (showingHumanOnly) Color.rgb(7, 20, 47) else Color.WHITE)
+        peopleModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(if (showingDistinctPeople) Color.rgb(255, 210, 31) else Color.rgb(37, 69, 111))
+        peopleModeButton.setTextColor(if (showingDistinctPeople) Color.rgb(7, 20, 47) else Color.WHITE)
     }
 
     private fun refreshSelectionStyles() { frameViews.keys.forEach { refreshCellStyle(it) } }
@@ -522,7 +739,7 @@ class MainActivity : Activity() {
         badge?.visibility = if (index in selectedFrames) View.VISIBLE else View.GONE
     }
     private fun updateSelectionText() {
-        selectionText.text = "انتخاب: ${selectedFrames.size} • باقی‌مانده: ${frameViews.size} از ۹۰"
+        selectionText.text = "${if (selectingForExport) "برای خروجی" else "برای حذف"}: ${selectedFrames.size} • باقی‌مانده: ${frameViews.size} از ${ROWS * FRAMES_PER_ROW}"
         refreshSelectionStyles()
     }
     private fun formatTime(ms: Long): String {
@@ -546,5 +763,119 @@ class MainActivity : Activity() {
         private const val REQUEST_VIDEO = 2101
         private const val ROWS = 8
         private const val FRAMES_PER_ROW = 15
+        private const val CUT_GAP_US = 450_000L
     }
+}
+
+
+/** Interactive timeline: one-finger drag scrubs; pinch changes the visible time scale. */
+class TimelineView(context: android.content.Context, attrs: android.util.AttributeSet? = null) : View(context, attrs) {
+    var onSeek: ((Long) -> Unit)? = null
+    var onSelectRange: ((Pair<Long, Long>) -> Unit)? = null
+    var playheadMs: Long = 0L
+        private set
+    private var durationMs = 0L
+    private var splitPoints = listOf<Long>()
+    private var deletedRanges = listOf<Pair<Long, Long>>()
+    private var zoom = 1f
+    private var windowStartMs = 0L
+    private var lastX = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var initialSpan = 0f
+    private var initialZoom = 1f
+    private var moved = false
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val density = resources.displayMetrics.density
+
+    fun setTimeline(duration: Long, cuts: List<Long>, deleted: List<Pair<Long, Long>>) {
+        durationMs = duration.coerceAtLeast(0L)
+        splitPoints = cuts.sorted()
+        deletedRanges = deleted.toList()
+        windowStartMs = windowStartMs.coerceIn(0L, max(0L, durationMs - visibleDuration()))
+        invalidate()
+    }
+    fun setPlayhead(timeMs: Long) { playheadMs = timeMs.coerceIn(0L, durationMs); invalidate() }
+    private fun visibleDuration(): Long = if (durationMs <= 0L) 1L else (durationMs / zoom).toLong().coerceAtLeast(1L)
+    private fun timeAt(x: Float): Long {
+        val usable = (width - 16f * density).coerceAtLeast(1f)
+        return (windowStartMs + ((x - 8f * density).coerceIn(0f, usable) / usable * visibleDuration())).coerceIn(0L, durationMs)
+    }
+    private fun xAt(time: Long): Float {
+        val usable = (width - 16f * density).coerceAtLeast(1f)
+        return 8f * density + ((time - windowStartMs).toFloat() / visibleDuration()).coerceIn(0f, 1f) * usable
+    }
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val left = 8f * density; val right = width - left
+        val top = height * .30f; val bottom = height * .72f
+        paint.color = Color.rgb(37, 69, 111); canvas.drawRoundRect(left, top, right, bottom, 5f * density, 5f * density, paint)
+        if (durationMs <= 0L) {
+            paint.color = Color.LTGRAY; paint.textSize = 11f * density
+            canvas.drawText("نوار زمان پس از انتخاب ویدیو آماده می‌شود", left, height * .58f, paint); return
+        }
+        val start = windowStartMs; val end = minOf(durationMs, start + visibleDuration())
+        deletedRanges.forEach { r ->
+            if (r.second >= start && r.first <= end) {
+                paint.color = Color.rgb(181, 44, 69)
+                canvas.drawRect(xAt(r.first), top, xAt(r.second), bottom, paint)
+            }
+        }
+        splitPoints.filter { it in start..end }.forEach { cut ->
+            paint.color = Color.rgb(255, 210, 31); paint.strokeWidth = 2f * density
+            canvas.drawLine(xAt(cut), top - 5f * density, xAt(cut), bottom + 5f * density, paint)
+        }
+        paint.color = Color.WHITE; paint.textSize = 9f * density
+        canvas.drawText(format(playheadMs), left, 10f * density + 2f, paint)
+        paint.color = Color.rgb(67, 217, 163); paint.strokeWidth = 3f * density
+        val px = xAt(playheadMs); canvas.drawLine(px, 3f * density, px, height.toFloat(), paint)
+        paint.color = Color.LTGRAY; paint.textSize = 8f * density
+        canvas.drawText(format(start), left, height - 3f * density, paint)
+        val endText = format(end); canvas.drawText(endText, right - paint.measureText(endText), height - 3f * density, paint)
+    }
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = event.x; lastX = event.x; downY = event.y; moved = false; return true }
+            MotionEvent.ACTION_POINTER_DOWN -> if (event.pointerCount >= 2) { initialSpan = span(event); initialZoom = zoom; moved = true; return true }
+            MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount >= 2) {
+                    val current = span(event)
+                    if (initialSpan > 0f && current > 0f && durationMs > 0L) {
+                        val focusTime = timeAt((event.getX(0) + event.getX(1)) / 2f)
+                        zoom = (initialZoom * current / initialSpan).coerceIn(1f, 80f)
+                        val frac = ((event.getX(0) + event.getX(1)) / 2f / width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                        windowStartMs = (focusTime - (visibleDuration() * frac).toLong()).coerceIn(0L, max(0L, durationMs - visibleDuration()))
+                        invalidate()
+                    }
+                    return true
+                }
+                val dx = event.x - lastX
+                if (kotlin.math.abs(event.x - downX) > 5f * density) moved = true
+                if (durationMs > 0L && moved) {
+                    val usable = (width - 16f * density).coerceAtLeast(1f)
+                    val shift = (-dx / usable * visibleDuration()).toLong()
+                    windowStartMs = (windowStartMs + shift).coerceIn(0L, max(0L, durationMs - visibleDuration()))
+                    playheadMs = timeAt(event.x)
+                    onSeek?.invoke(playheadMs)
+                    invalidate()
+                }
+                lastX = event.x; return true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (!moved && durationMs > 0L) {
+                    val t = timeAt(event.x); playheadMs = t; onSeek?.invoke(t)
+                    val boundaries = (listOf(0L) + splitPoints.filter { it in 0L..durationMs } + listOf(durationMs)).distinct().sorted()
+                    val idx = (0 until boundaries.size - 1).firstOrNull { t >= boundaries[it] && t <= boundaries[it + 1] } ?: 0
+                    if (boundaries.size > 1) onSelectRange?.invoke(boundaries[idx] to boundaries[idx + 1])
+                    invalidate()
+                }
+                performClick(); return true
+            }
+            MotionEvent.ACTION_CANCEL -> return true
+        }
+        return true
+    }
+    override fun performClick(): Boolean { super.performClick(); return true }
+    private fun span(e: MotionEvent): Float { if (e.pointerCount < 2) return 0f; val dx=e.getX(0)-e.getX(1); val dy=e.getY(0)-e.getY(1); return kotlin.math.sqrt(dx*dx+dy*dy) }
+    private fun format(ms: Long): String { val s=(ms.coerceAtLeast(0L)/1000L); return String.format(java.util.Locale.US, "%02d:%02d", s/60, s%60) }
 }
