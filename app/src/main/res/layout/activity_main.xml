@@ -54,7 +54,8 @@
     </LinearLayout>
 
     <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="false" android:scrollbars="vertical">
-        </ScrollView>
+        <LinearLayout android:id="@+id/storyboardRows" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+    </ScrollView>
 
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="تنظیم دستی رنگ خروجی (ضریب هر کانال: ۰ تا ۲)" android:textColor="#FFFFFF" android:textSize="11sp" android:gravity="center" android:paddingTop="0dp" />
 

@@ -11,8 +11,8 @@ android {
         applicationId = "com.evc.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 33
-        versionName = "0.2.33"
+        versionCode = 34
+        versionName = "0.2.34"
     }
 
     buildTypes {
