@@ -228,7 +228,7 @@
         android:layout_width="match_parent"
         android:layout_height="42dp"
         android:layout_marginTop="1dp"
-        android:text="رنگی‌سازی آزمایشی (پیش‌نمایش اسلایدها)"
+        android:text="رنگی‌سازی واقعی ویدیوی خروجی (گرم/سپیا)"
         android:textColor="#07142F"
         android:textStyle="bold"
         android:backgroundTint="#D7A6FF" />

@@ -64,3 +64,19 @@ This version does not cut video yet. The only app capability is selecting and pl
 - زمان نمونه‌برداری اسلایدها، زمان حرکت پخش به اسلاید و مرزبندی بازه‌های خروجی اکنون از تقسیم‌بندی یکسانِ ۱۲۰ بازه استفاده می‌کنند. این تغییر اختلاف مرزی نسخهٔ قبل را برطرف می‌کند.
 - این نسخه هنوز رنگی‌سازی را فقط به‌صورت پیش‌نمایش اسلایدها انجام می‌دهد؛ رنگی‌سازی واقعی فایل ویدیویی در این نسخه فعال نشده است و برای آن باید مسیر رمزگذاری مجدد فریم‌ها به‌صورت جداگانه پیاده‌سازی و آزمایش شود.
 - بیلد اندروید و رفتار خروجی روی دستگاه باید با GitHub Actions و یک فایل آزمایشی بررسی شود؛ ساخت ZIP به‌تنهایی تأییدکنندهٔ اجرای صحیح نیست.
+
+
+## Version 0.2.15 — حذف فاصلهٔ مصنوعی بین قطعه‌های خروجی
+
+- هنگام چسباندن بازه‌های باقی‌مانده یا اسلایدهای انتخاب‌شده، دیگر فاصلهٔ زمانی مصنوعی ۴۵۰ میلی‌ثانیه‌ای بین قطعه‌ها درج نمی‌شود.
+- هدف این تغییر، پخش پیوسته‌تر و جمع‌وجورتر خروجی است؛ منبع اصلی همچنان دست‌نخورده می‌ماند و خروجی در این حالت بدون رمزگذاری مجدد ساخته می‌شود.
+- محدودیت برش در مرز فریم‌های کلیدی کدک همچنان وجود دارد.
+- رنگی‌سازی واقعی فریم‌های ویدیوی خروجی هنوز پیاده‌سازی نشده است؛ رنگی‌سازی فعلی فقط پیش‌نمایش استوری‌بورد را تغییر می‌دهد.
+- بیلد اندروید و خروجی واقعی باید با GitHub Actions و یک ویدیوی آزمایشی بررسی شود.
+
+## Version 0.2.16 — real video export color effect
+- The colorization button now processes the actual video with AndroidX Media3 Transformer and writes a new MP4 under `Movies/EVC`.
+- The exported file uses a warm sepia effect on video frames; audio is retained by the transformer when supported by the source.
+- This is a color effect, not AI-based reconstruction of missing colors. It does not promise natural object-specific colors or restoration of original colors.
+- Export re-encodes the video, so original video codec/quality and file size are not guaranteed. The original source file remains unchanged.
+- The existing cut/export workflow is otherwise left untouched.

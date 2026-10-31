@@ -40,6 +40,14 @@ import com.google.mlkit.vision.pose.PoseDetection
 import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Effects
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.ExportException
+import androidx.media3.effect.RgbFilter
 import java.util.concurrent.Executors
 import java.io.File
 import java.io.FileInputStream
@@ -72,6 +80,7 @@ class MainActivity : Activity() {
     private var peopleDetectionRunning = false
     private val deletedStoryboardFrames = linkedSetOf<Int>()
     private var selectedUri: Uri? = null
+    private var activeTransformer: Transformer? = null
     private var videoDurationMs = 0L
     private var storyboardGeneration = 0
     private var humanDetectionRunning = false
@@ -158,7 +167,7 @@ class MainActivity : Activity() {
         selectForDeleteModeButton.setOnClickListener { setStoryboardSelectionMode(false) }
         selectForExportModeButton.setOnClickListener { setStoryboardSelectionMode(true) }
         findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo(selectingForExport) }
-        findViewById<Button>(R.id.colorizePreviewButton).setOnClickListener { colorizeStoryboardPreview() }
+        findViewById<Button>(R.id.colorizePreviewButton).setOnClickListener { exportColorizedVideo() }
         timeModeButton.setOnClickListener { showTimeMode() }
         humanModeButton.setOnClickListener { showHumanMode() }
         peopleModeButton.setOnClickListener { showDistinctPeopleMode() }
@@ -180,6 +189,75 @@ class MainActivity : Activity() {
         buildEmptyStoryboard()
         updateModeButtons()
         updateStoryboardSelectionModeButtons()
+    }
+
+    /** Exports a real MP4 with a warm sepia color effect using Media3 Transformer. */
+    private fun exportColorizedVideo() {
+        val source = selectedUri
+        if (source == null) {
+            Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_LONG).show()
+            return
+        }
+        val button = findViewById<Button>(R.id.colorizePreviewButton)
+        button.isEnabled = false
+        statusText.text = "در حال رنگی‌سازی و رمزگذاری ویدیوی خروجی؛ لطفاً برنامه را نبندید…"
+        val output = File(cacheDir, "evc_colorized_${System.currentTimeMillis()}.mp4")
+        try {
+            // A restrained warm sepia treatment is a real video-frame effect, not an AI
+            // restoration model. It avoids the previous green-tinted thumbnail heuristic.
+            val effects = Effects(emptyList(), listOf(RgbFilter.createSepiaFilter()))
+            val item = EditedMediaItem.Builder(MediaItem.fromUri(source))
+                .setEffects(effects)
+                .build()
+            val transformer = Transformer.Builder(this)
+                .addListener(object : Transformer.Listener {
+                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                        activeTransformer = null
+                        button.isEnabled = true
+                        try {
+                            val values = ContentValues().apply {
+                                put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_colorized_${System.currentTimeMillis()}.mp4")
+                                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
+                                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                                }
+                            }
+                            val outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                                ?: throw IllegalStateException("ساخت فایل در Movies/EVC ممکن نشد")
+                            contentResolver.openOutputStream(outUri)?.use { out -> FileInputStream(output).use { it.copyTo(out) } }
+                                ?: throw IllegalStateException("نوشتن فایل خروجی ناموفق بود")
+                            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                contentResolver.update(outUri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                            }
+                            output.delete()
+                            statusText.text = "ویدیوی رنگی‌شده در Movies/EVC ذخیره شد؛ صدا نیز در خروجی حفظ می‌شود"
+                            Toast.makeText(this@MainActivity, "ویدیوی رنگی‌شده ذخیره شد", Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            output.delete()
+                            statusText.text = "ذخیرهٔ ویدیوی رنگی‌شده ناموفق بود: ${e.message ?: "خطا"}"
+                            Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
+                        }
+                    }
+
+                    override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                        activeTransformer = null
+                        output.delete()
+                        button.isEnabled = true
+                        statusText.text = "رنگی‌سازی ویدیو ناموفق بود: ${exportException.message ?: "خطای رمزگذاری"}"
+                        Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
+                    }
+                })
+                .build()
+            activeTransformer = transformer
+            transformer.start(item, output.absolutePath)
+        } catch (e: Exception) {
+            activeTransformer = null
+            output.delete()
+            button.isEnabled = true
+            statusText.text = "شروع رنگی‌سازی ناموفق بود: ${e.message ?: "خطا"}"
+            Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+        }
     }
 
     // Experimental thumbnail-only colorization preview. It does not alter the source video
@@ -764,10 +842,8 @@ class MainActivity : Activity() {
                 }
                 val segmentDuration = (requestedEndMs * 1000L - segmentStart).coerceAtLeast(1L)
                 outputBaseUs += segmentDuration
-                // Leave a short presentation-time gap where deleted intervals were removed.
-                // This preserves the source codec (no re-encoding); players may hold the
-                // last frame briefly during the gap, making each cut perceptible.
-                if (rangeIndex < ranges.lastIndex) outputBaseUs += CUT_GAP_US
+                // Concatenate kept ranges continuously. Do not insert artificial timestamp
+                // gaps between selected segments; this keeps selected-output playback compact.
             }
         } finally {
             try { muxer.stop() } catch (_: Exception) { }
@@ -822,7 +898,6 @@ class MainActivity : Activity() {
         private const val REQUEST_VIDEO = 2101
         private const val ROWS = 8
         private const val FRAMES_PER_ROW = 15
-        private const val CUT_GAP_US = 450_000L
     }
 }
 
