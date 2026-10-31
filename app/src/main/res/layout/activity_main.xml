@@ -74,7 +74,7 @@
         </LinearLayout>
     </LinearLayout>
 
-    <Button android:id="@+id/applyColorToSelectedButton" android:layout_width="match_parent" android:layout_height="28dp" android:layout_marginTop="1dp" android:text="ثبت این ترکیب رنگ برای اسلایدهای انتخابی" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#FFD21F" />
+    <Button android:id="@+id/applyColorToSelectedButton" android:layout_width="match_parent" android:layout_height="42dp" android:layout_marginTop="3dp" android:minHeight="0dp" android:minWidth="0dp" android:paddingTop="0dp" android:paddingBottom="0dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:singleLine="true" android:gravity="center" android:text="ثبت این ترکیب رنگ برای اسلایدهای انتخابی" android:textSize="13sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#FFD21F" />
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="2dp">
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="حجم هدف (MB):" android:textColor="#FFFFFF" android:textSize="11sp" />

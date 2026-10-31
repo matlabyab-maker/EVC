@@ -870,6 +870,78 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Export each selected storyboard interval as its own independent file (never concatenate selections). */
+    private fun exportSelectedStoryboardFramesSeparately(source: Uri, selected: Set<Int>) {
+        val total = ROWS * FRAMES_PER_ROW
+        val deletedRanges = synchronized(deletedTimelineRanges) { deletedTimelineRanges.toList() }
+        val rangesToSave = mutableListOf<Pair<Int, Pair<Long, Long>>>()
+        selected.sorted().filter { it in 0 until total && it !in deletedStoryboardFrames }.forEach { index ->
+            val start = videoDurationMs * index / total
+            val end = videoDurationMs * (index + 1) / total
+            var pieces = listOf(start to end)
+            deletedRanges.sortedBy { it.first }.forEach { deleted ->
+                pieces = pieces.flatMap { piece ->
+                    val (a, b) = piece
+                    val da = deleted.first.coerceIn(a, b)
+                    val db = deleted.second.coerceIn(a, b)
+                    when {
+                        db <= a || da >= b -> listOf(piece)
+                        da <= a && db >= b -> emptyList()
+                        da <= a -> listOf(db to b).filter { it.second > it.first }
+                        db >= b -> listOf(a to da).filter { it.second > it.first }
+                        else -> listOf(a to da, db to b).filter { it.second > it.first }
+                    }
+                }
+            }
+            pieces.forEach { piece -> rangesToSave.add(index to piece) }
+        }
+        if (rangesToSave.isEmpty()) {
+            Toast.makeText(this, "هیچ بازهٔ انتخاب‌شده‌ای برای ذخیره باقی نمانده است", Toast.LENGTH_LONG).show()
+            return
+        }
+        val button = findViewById<Button>(R.id.exportButton)
+        button.isEnabled = false
+        statusText.text = "در حال ذخیرهٔ ${rangesToSave.size} تکه در فایل‌های جداگانه؛ هیچ تکه‌ای به دیگری چسبانده نمی‌شود…"
+        worker.execute {
+            var saved = 0
+            val errors = mutableListOf<String>()
+            rangesToSave.forEachIndexed { ordinal, item ->
+                val (frameIndex, range) = item
+                var temp: File? = null
+                var outUri: Uri? = null
+                try {
+                    temp = muxRemainingRanges(source, listOf(range))
+                    val values = ContentValues().apply {
+                        put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_slide_${(frameIndex + 1).toString().padStart(3, '0')}_part_${(ordinal + 1).toString().padStart(3, '0')}_${System.currentTimeMillis()}.mp4")
+                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        if (android.os.Build.VERSION.SDK_INT >= 29) {
+                            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
+                            put(MediaStore.Video.Media.IS_PENDING, 1)
+                        }
+                    }
+                    outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                        ?: throw IllegalStateException("ساخت فایل تکهٔ ${ordinal + 1} ناموفق بود")
+                    contentResolver.openOutputStream(outUri)?.use { output -> FileInputStream(temp).use { input -> input.copyTo(output) } }
+                        ?: throw IllegalStateException("نوشتن فایل تکهٔ ${ordinal + 1} ناموفق بود")
+                    if (android.os.Build.VERSION.SDK_INT >= 29) {
+                        contentResolver.update(outUri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                    }
+                    saved++
+                } catch (e: Exception) {
+                    outUri?.let { try { contentResolver.delete(it, null, null) } catch (_: Exception) { } }
+                    errors.add("اسلاید ${frameIndex + 1}: ${e.message ?: e.javaClass.simpleName}")
+                } finally {
+                    temp?.delete()
+                }
+            }
+            mainHandler.post {
+                button.isEnabled = true
+                statusText.text = if (errors.isEmpty()) "$saved تکه در فایل‌های مستقل ذخیره شد؛ مسیر Movies/EVC و بدون چسباندن تکه‌ها" else "$saved فایل ذخیره شد؛ ${errors.size} مورد ناموفق بود: ${errors.first()}"
+                Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     private fun exportRemainingVideo(onlySelected: Boolean = false) {
         val source = selectedUri
         if (source == null || videoDurationMs <= 0L) {
@@ -887,10 +959,15 @@ class MainActivity : Activity() {
             Toast.makeText(this, if (onlySelected) "هیچ اسلاید انتخاب‌شدهٔ قابل‌خروجی وجود ندارد" else "همهٔ بازه‌ها حذف شده‌اند؛ چیزی برای خروجی باقی نمانده است", Toast.LENGTH_LONG).show()
             return
         }
-        // Current version exports the remaining intervals without re-encoding.
+        if (onlySelected) {
+            // Each selected storyboard frame/range must become its own file, not one concatenated video.
+            exportSelectedStoryboardFramesSeparately(source, kept.toSet())
+            return
+        }
+        // Normal edited export keeps remaining ranges in one video without re-encoding.
         // The target-size/re-encoding mode will be added separately to avoid silently
         // changing codec or quality in the original-quality mode.
-        statusText.text = if (onlySelected) "در حال ساخت خروجی بدون تغییر کدک از اسلایدهای انتخاب‌شده…" else "در حال ساخت خروجی بدون تغییر کدک از بازه‌های باقی‌مانده…"
+        statusText.text = "در حال ساخت یک ویدیوی خروجی از بازه‌های باقی‌مانده بدون تغییر کدک…"
         findViewById<Button>(R.id.exportButton).isEnabled = false
         worker.execute {
             var result: File? = null
@@ -899,7 +976,7 @@ class MainActivity : Activity() {
                 val excluded = mutableListOf<Pair<Long, Long>>()
                 var runStart: Int? = null
                 for (i in 0 until total) {
-                    val shouldExclude = if (onlySelected) i !in requestedFrames || i in deletedStoryboardFrames else i in deletedStoryboardFrames
+                    val shouldExclude = i in deletedStoryboardFrames
                     if (shouldExclude && runStart == null) runStart = i
                     if ((!shouldExclude || i == total - 1) && runStart != null) {
                         val endIndex = if (shouldExclude && i == total - 1) i + 1 else i

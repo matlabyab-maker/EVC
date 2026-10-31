@@ -144,3 +144,7 @@ This version does not cut video yet. The only app capability is selecting and pl
 - Restores the missing `storyboardRows` container inside the storyboard ScrollView.
 - Fixes `Unresolved reference storyboardRows` in MainActivity by adding the matching XML ID.
 - No unrelated UI or export behavior changed.
+
+
+## Version 0.2.39
+Selected storyboard slides are now exported as separate video files. Each selected slide interval is muxed independently; selected intervals are no longer concatenated into one large output file. Files are saved under Movies/EVC without video re-encoding where the source codec allows stream-copy.
