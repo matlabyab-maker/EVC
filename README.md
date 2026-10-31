@@ -86,3 +86,14 @@ This version does not cut video yet. The only app capability is selecting and pl
 - Fix Media3 `Effects` package import for the video color effect.
 - Replace unavailable `RgbFilter.createSepiaFilter()` with a supported `RgbAdjustment` warm tint (red 1.12, green 1.00, blue 0.82).
 - No unrelated timeline/export timing changes.
+
+
+## نسخهٔ 0.2.18
+- افزودن کنترل دستی ضرایب کانال‌های قرمز، سبز و آبی برای افکت رنگی ویدیوی خروجی.
+- مقدار هر کانال از 0.00x تا 2.00x قابل تنظیم است؛ اعمال افکت هنگام فشردن دکمهٔ خروجی انجام می‌شود.
+- این افکت تنظیم رنگ کانال‌هاست و رنگی‌سازی هوشمند فیلم سیاه‌وسفید محسوب نمی‌شود.
+
+
+## EVC 0.2.19
+- Removed the human-scene and distinct-face detection modes, including their ML Kit dependencies.
+- Kept the time-based storyboard mode and existing manual RGB color controls.

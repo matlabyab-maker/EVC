@@ -32,14 +32,10 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.MediaController
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.VideoView
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.pose.PoseDetection
-import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
-import com.google.mlkit.vision.face.FaceDetection
-import com.google.mlkit.vision.face.FaceDetectorOptions
 import androidx.media3.common.MediaItem
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.EditedMediaItem
@@ -60,8 +56,6 @@ class MainActivity : Activity() {
     private lateinit var storyboardRows: LinearLayout
     private lateinit var selectionText: TextView
     private lateinit var timeModeButton: Button
-    private lateinit var humanModeButton: Button
-    private lateinit var peopleModeButton: Button
     private lateinit var selectForDeleteModeButton: Button
     private lateinit var selectForExportModeButton: Button
     private var selectingForExport = false
@@ -74,33 +68,11 @@ class MainActivity : Activity() {
     private val selectedFrames = linkedSetOf<Int>()
     private val frameViews = mutableMapOf<Int, FrameLayout>()
     private val frameBitmaps = mutableMapOf<Int, Bitmap>()
-    private val humanFrames = linkedSetOf<Int>()
-    private val distinctPeopleFrames = linkedSetOf<Int>()
-    private var showingDistinctPeople = false
-    private var peopleDetectionRunning = false
     private val deletedStoryboardFrames = linkedSetOf<Int>()
     private var selectedUri: Uri? = null
     private var activeTransformer: Transformer? = null
     private var videoDurationMs = 0L
     private var storyboardGeneration = 0
-    private var humanDetectionRunning = false
-    private var showingHumanOnly = false
-
-    private val faceDetector by lazy {
-        val options = FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
-            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
-            .build()
-        FaceDetection.getClient(options)
-    }
-
-    private val poseDetector by lazy {
-        val options = PoseDetectorOptions.Builder()
-            .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE)
-            .build()
-        PoseDetection.getClient(options)
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -111,8 +83,6 @@ class MainActivity : Activity() {
         storyboardRows = findViewById(R.id.storyboardRows)
         selectionText = findViewById(R.id.selectionText)
         timeModeButton = findViewById(R.id.timeModeButton)
-        humanModeButton = findViewById(R.id.humanModeButton)
-        peopleModeButton = findViewById(R.id.peopleModeButton)
         selectForDeleteModeButton = findViewById(R.id.selectForDeleteModeButton)
         selectForExportModeButton = findViewById(R.id.selectForExportModeButton)
         timelineView = findViewById(R.id.timelineView)
@@ -168,9 +138,8 @@ class MainActivity : Activity() {
         selectForExportModeButton.setOnClickListener { setStoryboardSelectionMode(true) }
         findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo(selectingForExport) }
         findViewById<Button>(R.id.colorizePreviewButton).setOnClickListener { exportColorizedVideo() }
+        setupManualColorControls()
         timeModeButton.setOnClickListener { showTimeMode() }
-        humanModeButton.setOnClickListener { showHumanMode() }
-        peopleModeButton.setOnClickListener { showDistinctPeopleMode() }
 
         val controller = MediaController(this)
         controller.setAnchorView(videoView)
@@ -191,7 +160,31 @@ class MainActivity : Activity() {
         updateStoryboardSelectionModeButtons()
     }
 
-    /** Exports a real MP4 with a warm sepia color effect using Media3 Transformer. */
+    /** Sets up manual RGB channel controls for the real video export. */
+    private fun setupManualColorControls() {
+        val red = findViewById<SeekBar>(R.id.redColorSeek)
+        val green = findViewById<SeekBar>(R.id.greenColorSeek)
+        val blue = findViewById<SeekBar>(R.id.blueColorSeek)
+        val redValue = findViewById<TextView>(R.id.redColorValue)
+        val greenValue = findViewById<TextView>(R.id.greenColorValue)
+        val blueValue = findViewById<TextView>(R.id.blueColorValue)
+        fun updateLabels() {
+            redValue.text = "قرمز ${"%.2f".format(java.util.Locale.US, red.progress / 100f)}"
+            greenValue.text = "سبز ${"%.2f".format(java.util.Locale.US, green.progress / 100f)}"
+            blueValue.text = "آبی ${"%.2f".format(java.util.Locale.US, blue.progress / 100f)}"
+        }
+        val listener = object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) = updateLabels()
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        }
+        red.setOnSeekBarChangeListener(listener)
+        green.setOnSeekBarChangeListener(listener)
+        blue.setOnSeekBarChangeListener(listener)
+        updateLabels()
+    }
+
+    /** Exports the video using the manually selected RGB channel gains. */
     private fun exportColorizedVideo() {
         val source = selectedUri
         if (source == null) {
@@ -203,14 +196,17 @@ class MainActivity : Activity() {
         statusText.text = "در حال رنگی‌سازی و رمزگذاری ویدیوی خروجی؛ لطفاً برنامه را نبندید…"
         val output = File(cacheDir, "evc_colorized_${System.currentTimeMillis()}.mp4")
         try {
-            // A restrained warm sepia treatment is a real video-frame effect, not an AI
-            // restoration model. It avoids the previous green-tinted thumbnail heuristic.
-            val warmTint = RgbAdjustment.Builder()
-                .setRedScale(1.12f)
-                .setGreenScale(1.00f)
-                .setBlueScale(0.82f)
+            // Manually adjustable RGB channel gains (0.00x–2.00x).
+            // This is a real frame effect, not AI-based natural colorization.
+            val redScale = findViewById<SeekBar>(R.id.redColorSeek).progress / 100f
+            val greenScale = findViewById<SeekBar>(R.id.greenColorSeek).progress / 100f
+            val blueScale = findViewById<SeekBar>(R.id.blueColorSeek).progress / 100f
+            val manualTint = RgbAdjustment.Builder()
+                .setRedScale(redScale)
+                .setGreenScale(greenScale)
+                .setBlueScale(blueScale)
                 .build()
-            val effects = Effects(emptyList(), listOf(warmTint))
+            val effects = Effects(emptyList(), listOf(manualTint))
             val item = EditedMediaItem.Builder(MediaItem.fromUri(source))
                 .setEffects(effects)
                 .build()
@@ -343,9 +339,7 @@ class MainActivity : Activity() {
         selectedFrames.clear()
         frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
         frameBitmaps.clear()
-        humanFrames.clear()
         deletedStoryboardFrames.clear()
-        showingHumanOnly = false
         buildEmptyStoryboard()
         emptyHint.visibility = View.VISIBLE
         statusText.text = "در حال آماده‌سازی ویدیو و استخراج فریم‌ها…"
@@ -480,14 +474,14 @@ class MainActivity : Activity() {
                                 image?.setImageBitmap(scaled)
                                 image?.clearColorFilter()
                                 (cell?.getChildAt(1) as? TextView)?.text = formatTime(timestampMs)
-                                cell?.visibility = if (showingHumanOnly && index !in humanFrames) View.GONE else View.VISIBLE
+                                cell?.visibility = if (index in deletedStoryboardFrames) View.GONE else View.VISIBLE
                             } else scaled.recycle()
                         }
                     }
                 }
                 mainHandler.post {
                     if (generation == storyboardGeneration) {
-                        statusText.text = "استوری‌بورد آماده است: ۶ ردیف × ۱۵ فریم؛ برای تشخیص انسان حالت صحنه‌های انسانی را بزنید"
+                        statusText.text = "استوری‌بورد زمانی آماده است: ۶ ردیف × ۱۵ فریم"
                     }
                 }
             } catch (_: Exception) {
@@ -497,145 +491,10 @@ class MainActivity : Activity() {
     }
 
     private fun showTimeMode() {
-        showingHumanOnly = false
-        showingDistinctPeople = false
         frameViews.forEach { (index, view) -> view.visibility = if (index in deletedStoryboardFrames) View.GONE else View.VISIBLE }
         updateModeButtons()
         updateStoryboardSelectionModeButtons()
         statusText.text = "نمایش زمانی: فریم‌ها در طول ویدیو با فاصلهٔ زمانی نمونه‌برداری شده‌اند"
-    }
-
-    private fun showHumanMode() {
-        if (selectedUri == null) {
-            Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_SHORT).show()
-            return
-        }
-        showingHumanOnly = true
-        showingDistinctPeople = false
-        updateModeButtons()
-        updateStoryboardSelectionModeButtons()
-        val indices = frameBitmaps.keys.filter { it !in deletedStoryboardFrames }.sorted()
-        if (indices.isEmpty()) {
-            statusText.text = "ابتدا صبر کنید تا فریم‌ها استخراج شوند"
-            showingHumanOnly = false
-            updateModeButtons()
-        updateStoryboardSelectionModeButtons()
-            return
-        }
-        if (humanDetectionRunning) return
-        humanDetectionRunning = true
-        humanFrames.clear()
-        statusText.text = "در حال تشخیص انسان در فریم‌ها… 0/${indices.size}"
-        detectHumanAt(indices, 0, storyboardGeneration)
-    }
-
-    private fun detectHumanAt(indices: List<Int>, position: Int, generation: Int) {
-        if (generation != storyboardGeneration || !showingHumanOnly) {
-            humanDetectionRunning = false
-            return
-        }
-        if (position >= indices.size) {
-            humanDetectionRunning = false
-            frameViews.forEach { (index, view) -> view.visibility = if (index in humanFrames) View.VISIBLE else View.GONE }
-            statusText.text = "پایان تشخیص: ${humanFrames.size} فریم دارای انسان از ${indices.size} فریم بررسی‌شده"
-            return
-        }
-        val index = indices[position]
-        val bitmap = frameBitmaps[index]
-        if (bitmap == null || bitmap.isRecycled) {
-            mainHandler.post { detectHumanAt(indices, position + 1, generation) }
-            return
-        }
-        val input = InputImage.fromBitmap(bitmap, 0)
-        poseDetector.process(input)
-            .addOnSuccessListener { pose ->
-                // Pose detection identifies a person when enough body landmarks are present.
-                if (pose.allPoseLandmarks.size >= 5) humanFrames.add(index)
-            }
-            .addOnFailureListener { /* Skip uncertain frame and continue. */ }
-            .addOnCompleteListener {
-                statusText.text = "در حال تشخیص انسان… ${position + 1}/${indices.size}"
-                detectHumanAt(indices, position + 1, generation)
-            }
-    }
-
-
-    private fun showDistinctPeopleMode() {
-        if (selectedUri == null) {
-            Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_SHORT).show()
-            return
-        }
-        showingDistinctPeople = true
-        showingHumanOnly = false
-        updateModeButtons()
-        updateStoryboardSelectionModeButtons()
-        val indices = frameBitmaps.keys.filter { it !in deletedStoryboardFrames }.sorted()
-        if (indices.isEmpty()) {
-            statusText.text = "ابتدا صبر کنید تا فریم‌ها استخراج شوند"
-            showingDistinctPeople = false
-            updateModeButtons()
-        updateStoryboardSelectionModeButtons()
-            return
-        }
-        if (peopleDetectionRunning) return
-        peopleDetectionRunning = true
-        distinctPeopleFrames.clear()
-        statusText.text = "در حال یافتن چهره‌های متفاوت… 0/${indices.size}"
-        detectDistinctPeopleAt(indices, 0, storyboardGeneration, mutableListOf())
-    }
-
-    // Selects representative frames for visually different detected faces. This is a
-    // lightweight appearance heuristic, not biometric identity recognition.
-    private fun detectDistinctPeopleAt(indices: List<Int>, position: Int, generation: Int, signatures: MutableList<FloatArray>) {
-        if (generation != storyboardGeneration || !showingDistinctPeople) {
-            peopleDetectionRunning = false
-            return
-        }
-        if (position >= indices.size) {
-            peopleDetectionRunning = false
-            frameViews.forEach { (index, view) ->
-                view.visibility = if (index in deletedStoryboardFrames) View.GONE else if (index in distinctPeopleFrames) View.VISIBLE else View.GONE
-            }
-            statusText.text = "پایان بررسی: ${distinctPeopleFrames.size} اسلاید نماینده از چهره‌های متفاوت؛ تشخیص تقریبی است"
-            return
-        }
-        val index = indices[position]
-        val bitmap = frameBitmaps[index]
-        if (bitmap == null || bitmap.isRecycled) {
-            mainHandler.post { detectDistinctPeopleAt(indices, position + 1, generation, signatures) }
-            return
-        }
-        faceDetector.process(InputImage.fromBitmap(bitmap, 0))
-            .addOnSuccessListener { faces ->
-                for (face in faces.sortedByDescending { it.boundingBox.width() * it.boundingBox.height() }) {
-                    val b = face.boundingBox
-                    val left = b.left.coerceIn(0, bitmap.width - 1)
-                    val top = b.top.coerceIn(0, bitmap.height - 1)
-                    val right = b.right.coerceIn(left + 1, bitmap.width)
-                    val bottom = b.bottom.coerceIn(top + 1, bitmap.height)
-                    if ((right - left) < 12 || (bottom - top) < 12) continue
-                    val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
-                    val thumb = Bitmap.createScaledBitmap(crop, 12, 12, true)
-                    if (thumb !== crop) crop.recycle()
-                    val sig = FloatArray(144)
-                    var k = 0
-                    for (y in 0 until 12) for (x in 0 until 12) {
-                        val c = thumb.getPixel(x, y)
-                        sig[k++] = (Color.red(c) * 0.299f + Color.green(c) * 0.587f + Color.blue(c) * 0.114f) / 255f
-                    }
-                    thumb.recycle()
-                    val nearest = signatures.minOfOrNull { old -> sig.indices.map { kotlin.math.abs(sig[it] - old[it]) }.average() } ?: 1.0
-                    if (nearest > 0.16) {
-                        signatures.add(sig)
-                        distinctPeopleFrames.add(index)
-                        break
-                    }
-                }
-            }
-            .addOnCompleteListener {
-                statusText.text = "در حال یافتن چهره‌های متفاوت… ${position + 1}/${indices.size}"
-                detectDistinctPeopleAt(indices, position + 1, generation, signatures)
-            }
     }
 
     private fun selectedForExportButtonReset() {
@@ -675,7 +534,6 @@ class MainActivity : Activity() {
             frameViews[index]?.let { cell -> (cell.parent as? ViewGroup)?.removeView(cell) }
             frameViews.remove(index)
             frameBitmaps.remove(index)?.let { if (!it.isRecycled) it.recycle() }
-            humanFrames.remove(index)
         }
         selectedFrames.clear()
         updateSelectionText()
@@ -863,12 +721,8 @@ class MainActivity : Activity() {
     }
 
     private fun updateModeButtons() {
-        timeModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(if (!showingHumanOnly) Color.rgb(255, 210, 31) else Color.rgb(37, 69, 111))
-        timeModeButton.setTextColor(if (!showingHumanOnly) Color.rgb(7, 20, 47) else Color.WHITE)
-        humanModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(if (showingHumanOnly) Color.rgb(255, 210, 31) else Color.rgb(37, 69, 111))
-        humanModeButton.setTextColor(if (showingHumanOnly) Color.rgb(7, 20, 47) else Color.WHITE)
-        peopleModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(if (showingDistinctPeople) Color.rgb(255, 210, 31) else Color.rgb(37, 69, 111))
-        peopleModeButton.setTextColor(if (showingDistinctPeople) Color.rgb(7, 20, 47) else Color.WHITE)
+        timeModeButton.backgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(255, 210, 31))
+        timeModeButton.setTextColor(Color.rgb(7, 20, 47))
     }
 
     private fun refreshSelectionStyles() { frameViews.keys.forEach { refreshCellStyle(it) } }
@@ -896,7 +750,6 @@ class MainActivity : Activity() {
         storyboardGeneration++
         worker.shutdownNow()
         frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
-        try { poseDetector.close() } catch (_: Exception) { }
         super.onDestroy()
     }
     companion object {
