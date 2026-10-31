@@ -140,7 +140,7 @@ This version does not cut video yet. The only app capability is selecting and pl
 - Storyboard start/end buttons now capture the current playback position directly; no time-picker dialog opens.
 
 
-## v0.2.34 — Fix storyboardRows compile error
+## v0.2.35 — Fix storyboardRows compile error
 - Restores the missing `storyboardRows` container inside the storyboard ScrollView.
 - Fixes `Unresolved reference storyboardRows` in MainActivity by adding the matching XML ID.
 - No unrelated UI or export behavior changed.
