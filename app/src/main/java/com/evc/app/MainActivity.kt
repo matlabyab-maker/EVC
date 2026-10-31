@@ -157,6 +157,7 @@ class MainActivity : Activity() {
         selectForDeleteModeButton.setOnClickListener { setStoryboardSelectionMode(false) }
         selectForExportModeButton.setOnClickListener { setStoryboardSelectionMode(true) }
         findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo(selectingForExport) }
+        findViewById<Button>(R.id.colorizePreviewButton).setOnClickListener { colorizeStoryboardPreview() }
         timeModeButton.setOnClickListener { showTimeMode() }
         humanModeButton.setOnClickListener { showHumanMode() }
         peopleModeButton.setOnClickListener { showDistinctPeopleMode() }
@@ -178,6 +179,54 @@ class MainActivity : Activity() {
         buildEmptyStoryboard()
         updateModeButtons()
         updateStoryboardSelectionModeButtons()
+    }
+
+    // Experimental thumbnail-only colorization preview. It does not alter the source video
+    // or the exported video; this first prototype uses luminance heuristics, not AI segmentation.
+    private fun colorizeStoryboardPreview() {
+        if (frameBitmaps.isEmpty()) {
+            Toast.makeText(this, "ابتدا ویدیو را انتخاب کنید و منتظر استخراج اسلایدها بمانید", Toast.LENGTH_LONG).show()
+            return
+        }
+        var processed = 0
+        for ((index, original) in frameBitmaps) {
+            if (original.isRecycled) continue
+            val w = original.width
+            val h = original.height
+            val pixels = IntArray(w * h)
+            original.getPixels(pixels, 0, w, 0, 0, w, h)
+            for (i in pixels.indices) {
+                val c = pixels[i]
+                val r = Color.red(c)
+                val g = Color.green(c)
+                val b = Color.blue(c)
+                val y = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+                val chroma = maxOf(r, g, b) - minOf(r, g, b)
+                if (chroma < 28 && y in 35..220) {
+                    // Heuristic only: mid/darker tones receive a restrained green tint;
+                    // brighter midtones receive a restrained warm tint.
+                    pixels[i] = if (y < 118) {
+                        Color.rgb((y * 0.72).toInt().coerceIn(0,255),
+                                  (y * 1.08 + 8).toInt().coerceIn(0,255),
+                                  (y * 0.70).toInt().coerceIn(0,255))
+                    } else {
+                        Color.rgb((y * 1.10 + 12).toInt().coerceIn(0,255),
+                                  (y * 0.88 + 5).toInt().coerceIn(0,255),
+                                  (y * 0.72).toInt().coerceIn(0,255))
+                    }
+                }
+            }
+            val preview = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            preview.setPixels(pixels, 0, w, 0, 0, w, h)
+            val cell = frameViews[index]
+            val image = cell?.let { container ->
+                (0 until container.childCount).mapNotNull { container.getChildAt(it) as? ImageView }.firstOrNull()
+            }
+            image?.setImageBitmap(preview)
+            processed++
+        }
+        statusText.text = "پیش‌نمایش رنگی‌سازی آزمایشی روی $processed اسلاید اعمال شد؛ ویدیوی اصلی و خروجی تغییر نکرده‌اند"
+        Toast.makeText(this, "این نسخه فقط پیش‌نمایش اسلایدها را رنگی می‌کند؛ خروجی ویدیویی رنگی هنوز فعال نیست", Toast.LENGTH_LONG).show()
     }
 
     private fun chooseVideo() {
@@ -833,15 +882,29 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
         if (thumbnails.isNotEmpty()) {
             val save = canvas.save()
             canvas.clipRect(left, top, right, bottom)
-            val visibleFrames = thumbnails.filter { it.first >= start && it.first <= end }
-            visibleFrames.forEachIndexed { index, frame ->
+            // Keep each thumbnail's aspect ratio. Crop the source bitmap to the
+            // destination cell's aspect ratio instead of stretching it to fit.
+            thumbnails.forEachIndexed { index, frame ->
                 val centerX = xAt(frame.first)
-                val prevX = if (index == 0) left else (xAt(visibleFrames[index - 1].first) + centerX) / 2f
-                val nextX = if (index == visibleFrames.lastIndex) right else (centerX + xAt(visibleFrames[index + 1].first)) / 2f
+                val prevX = if (index == 0) left else (xAt(thumbnails[index - 1].first) + centerX) / 2f
+                val nextX = if (index == thumbnails.lastIndex) right else (centerX + xAt(thumbnails[index + 1].first)) / 2f
+                if (nextX < left || prevX > right) return@forEachIndexed
                 val dst = RectF(max(left, prevX), top, minOf(right, nextX), bottom)
-                if (dst.width() > 0f) {
+                if (dst.width() > 0f && dst.height() > 0f) {
+                    val bitmap = frame.second
+                    val targetRatio = dst.width() / dst.height()
+                    val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                    val srcRect = if (bitmapRatio > targetRatio) {
+                        val cropWidth = (bitmap.height * targetRatio).toInt().coerceIn(1, bitmap.width)
+                        val cropLeft = (bitmap.width - cropWidth) / 2
+                        Rect(cropLeft, 0, cropLeft + cropWidth, bitmap.height)
+                    } else {
+                        val cropHeight = (bitmap.width / targetRatio).toInt().coerceIn(1, bitmap.height)
+                        val cropTop = (bitmap.height - cropHeight) / 2
+                        Rect(0, cropTop, bitmap.width, cropTop + cropHeight)
+                    }
                     paint.color = Color.WHITE
-                    canvas.drawBitmap(frame.second, null, dst, paint)
+                    canvas.drawBitmap(bitmap, srcRect, dst, paint)
                 }
             }
             canvas.restoreToCount(save)

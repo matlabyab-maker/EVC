@@ -224,6 +224,16 @@
     </ScrollView>
 
     <Button
+        android:id="@+id/colorizePreviewButton"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:layout_marginTop="1dp"
+        android:text="رنگی‌سازی آزمایشی (پیش‌نمایش اسلایدها)"
+        android:textColor="#07142F"
+        android:textStyle="bold"
+        android:backgroundTint="#D7A6FF" />
+
+    <Button
         android:id="@+id/exportButton"
         android:layout_width="match_parent"
         android:layout_height="42dp"
