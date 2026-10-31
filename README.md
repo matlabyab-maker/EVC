@@ -57,3 +57,10 @@ This version does not cut video yet. The only app capability is selecting and pl
 - In selected-output mode, the output contains only the time intervals represented by selected slides. Unselected intervals and any timeline-deleted ranges are excluded.
 - The export button label changes with the active mode, and the delete action is blocked while selected-output mode is active to reduce accidental operations.
 - Build/test status: not run in this environment because no local Gradle executable or project Gradle wrapper is available; GitHub Actions is configured to build the project.
+
+
+## Version 0.2.14 — هم‌ترازسازی زمان اسلاید و خروجی
+
+- زمان نمونه‌برداری اسلایدها، زمان حرکت پخش به اسلاید و مرزبندی بازه‌های خروجی اکنون از تقسیم‌بندی یکسانِ ۱۲۰ بازه استفاده می‌کنند. این تغییر اختلاف مرزی نسخهٔ قبل را برطرف می‌کند.
+- این نسخه هنوز رنگی‌سازی را فقط به‌صورت پیش‌نمایش اسلایدها انجام می‌دهد؛ رنگی‌سازی واقعی فایل ویدیویی در این نسخه فعال نشده است و برای آن باید مسیر رمزگذاری مجدد فریم‌ها به‌صورت جداگانه پیاده‌سازی و آزمایش شود.
+- بیلد اندروید و رفتار خروجی روی دستگاه باید با GitHub Actions و یک فایل آزمایشی بررسی شود؛ ساخت ZIP به‌تنهایی تأییدکنندهٔ اجرای صحیح نیست.

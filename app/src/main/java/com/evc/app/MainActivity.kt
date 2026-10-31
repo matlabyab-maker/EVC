@@ -330,7 +330,7 @@ class MainActivity : Activity() {
             if (!selectedFrames.add(index)) selectedFrames.remove(index)
             refreshCellStyle(index)
             updateSelectionText()
-            val timeMs = videoDurationMs * index / (ROWS * FRAMES_PER_ROW - 1)
+            val timeMs = videoDurationMs * index / (ROWS * FRAMES_PER_ROW)
             timelineView.setPlayhead(timeMs)
             try { videoView.seekTo(timeMs.toInt()) } catch (_: Exception) { }
         }
@@ -363,7 +363,7 @@ class MainActivity : Activity() {
                 for (index in 0 until count) {
                     if (generation != storyboardGeneration) break
                     if (index in deletedStoryboardFrames) continue
-                    val timestampMs = if (count <= 1) 0L else duration * index / (count - 1)
+                    val timestampMs = if (count <= 1) 0L else duration * index / count
                     // Some containers/codecs return null for an exact sampled timestamp.
                     // Retry nearby timestamps and a key-frame lookup before leaving a blank cell.
                     var bitmap: Bitmap? = null
@@ -389,7 +389,7 @@ class MainActivity : Activity() {
                             if (generation == storyboardGeneration) {
                                 frameBitmaps[index] = scaled
                                 timelineView.setThumbnails(frameBitmaps.entries.sortedBy { it.key }.map { entry ->
-                                    val sampleTime = if (count <= 1) 0L else duration * entry.key / (count - 1)
+                                    val sampleTime = if (count <= 1) 0L else duration * entry.key / count
                                     sampleTime to entry.value
                                 })
                                 val cell = frameViews[index]
