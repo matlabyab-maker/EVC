@@ -39,6 +39,9 @@ import android.widget.VideoView
 import androidx.media3.common.MediaItem
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.VideoEncoderSettings
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.ExportResult
@@ -51,6 +54,9 @@ import kotlin.math.max
 
 class MainActivity : Activity() {
     private lateinit var videoView: VideoView
+    private lateinit var playerColorPreview: ImageView
+    private val previewBitmaps = mutableMapOf<Int, Bitmap>()
+    private var playerPreviewRequest = 0
     private lateinit var statusText: TextView
     private lateinit var emptyHint: TextView
     private lateinit var storyboardRows: LinearLayout
@@ -73,11 +79,14 @@ class MainActivity : Activity() {
     private var activeTransformer: Transformer? = null
     private var videoDurationMs = 0L
     private var storyboardGeneration = 0
+    private data class RgbProfile(val red: Float, val green: Float, val blue: Float)
+    private val frameColorProfiles = mutableMapOf<Int, RgbProfile>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         videoView = findViewById(R.id.videoView)
+        playerColorPreview = findViewById(R.id.playerColorPreview)
         statusText = findViewById(R.id.statusText)
         emptyHint = findViewById(R.id.emptyHint)
         storyboardRows = findViewById(R.id.storyboardRows)
@@ -137,6 +146,7 @@ class MainActivity : Activity() {
         selectForDeleteModeButton.setOnClickListener { setStoryboardSelectionMode(false) }
         selectForExportModeButton.setOnClickListener { setStoryboardSelectionMode(true) }
         findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo(selectingForExport) }
+        findViewById<Button>(R.id.applyColorToSelectedButton).setOnClickListener { applyColorToSelectedFrames() }
         findViewById<Button>(R.id.colorizePreviewButton).setOnClickListener { exportColorizedVideo() }
         setupManualColorControls()
         timeModeButton.setOnClickListener { showTimeMode() }
@@ -146,6 +156,7 @@ class MainActivity : Activity() {
         videoView.setMediaController(controller)
         videoView.setOnPreparedListener { mediaPlayer ->
             emptyHint.visibility = View.GONE
+            playerColorPreview.visibility = View.GONE
             statusText.text = "ویدیو آمادهٔ پخش است"
             mediaPlayer.setOnVideoSizeChangedListener { _, _, _ -> controller.setAnchorView(videoView) }
         }
@@ -158,6 +169,55 @@ class MainActivity : Activity() {
         buildEmptyStoryboard()
         updateModeButtons()
         updateStoryboardSelectionModeButtons()
+        handleIncomingVideoIntent(intent)
+    }
+
+    /** Accepts a video shared from another app through Android's Sharesheet. */
+    private fun handleIncomingVideoIntent(incoming: Intent?) {
+        if (incoming == null) return
+        val action = incoming.action
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+        val sharedUri: Uri? = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            incoming.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            (incoming.getParcelableExtra<android.os.Parcelable>(Intent.EXTRA_STREAM) as? Uri)
+        }
+        val uri = sharedUri ?: incoming.clipData?.getItemAt(0)?.uri
+        if (uri == null) {
+            Toast.makeText(this, "ویدیوی اشتراک‌گذاری‌شده قابل دریافت نیست", Toast.LENGTH_LONG).show()
+            return
+        }
+        loadSelectedVideo(uri, false)
+    }
+
+    private fun loadSelectedVideo(uri: Uri, persistPermission: Boolean) {
+        if (persistPermission) {
+            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+        }
+        selectedUri = uri
+        selectingForExport = false
+        selectedForExportButtonReset()
+        timelineSplitPoints.clear()
+        deletedTimelineRanges.clear()
+        selectedTimelineRange = null
+        timelineView.setTimeline(0L, emptyList(), emptyList())
+        timelineView.setThumbnails(emptyList())
+        selectedFrames.clear()
+        frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
+        frameBitmaps.clear()
+        previewBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
+        previewBitmaps.clear()
+        playerColorPreview.setImageDrawable(null)
+        playerColorPreview.visibility = View.GONE
+        deletedStoryboardFrames.clear()
+        frameColorProfiles.clear()
+        buildEmptyStoryboard()
+        emptyHint.visibility = View.VISIBLE
+        statusText.text = "در حال آماده‌سازی ویدیو و استخراج فریم‌ها…"
+        videoView.setVideoURI(uri)
+        videoView.requestFocus()
+        loadStoryboard(uri)
     }
 
     /** Sets up manual RGB channel controls for the real video export. */
@@ -174,7 +234,10 @@ class MainActivity : Activity() {
             blueValue.text = "آبی ${"%.2f".format(java.util.Locale.US, blue.progress / 100f)}"
         }
         val listener = object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) = updateLabels()
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                updateLabels()
+                if (fromUser) refreshLiveColorPreview()
+            }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         }
@@ -184,33 +247,129 @@ class MainActivity : Activity() {
         updateLabels()
     }
 
-    /** Exports the video using the manually selected RGB channel gains. */
+    /** Save the current RGB combination for every selected storyboard interval. */
+    private fun applyColorToSelectedFrames() {
+        if (selectedUri == null || videoDurationMs <= 0L) {
+            Toast.makeText(this, "ابتدا ویدیو را انتخاب کنید", Toast.LENGTH_SHORT).show(); return
+        }
+        if (selectedFrames.isEmpty()) {
+            Toast.makeText(this, "ابتدا یک یا چند اسلاید را انتخاب کنید", Toast.LENGTH_LONG).show(); return
+        }
+        val profile = currentRgbProfile()
+        selectedFrames.forEach { frameColorProfiles[it] = profile }
+        refreshLiveColorPreview()
+        statusText.text = "ترکیب رنگ فعلی برای ${selectedFrames.size} اسلاید ذخیره شد؛ برای هر اسلاید می‌توان ترکیب دیگری ثبت کرد"
+        Toast.makeText(this, "تنظیم رنگ برای ${selectedFrames.size} اسلاید ذخیره شد", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Updates storyboard thumbnails immediately and shows a tinted still-frame overlay in the player. */
+    private fun refreshLiveColorPreview() {
+        val current = currentRgbProfile()
+        for ((index, original) in frameBitmaps) {
+            if (original.isRecycled) continue
+            val profile = if (selectedFrames.isEmpty() || index in selectedFrames) current else frameColorProfiles[index] ?: RgbProfile(1f, 1f, 1f)
+            val tinted = tintBitmap(original, profile)
+            previewBitmaps.put(index, tinted)?.let { old -> if (!old.isRecycled) old.recycle() }
+            val cell = frameViews[index]
+            val image = cell?.let { container ->
+                (0 until container.childCount).mapNotNull { container.getChildAt(it) as? ImageView }.firstOrNull()
+            }
+            image?.setImageBitmap(tinted)
+        }
+        val source = selectedUri ?: run { playerColorPreview.visibility = View.GONE; return }
+        val request = ++playerPreviewRequest
+        val position = try { videoView.currentPosition.toLong().coerceAtLeast(0L) } catch (_: Exception) { 0L }
+        playerColorPreview.visibility = View.VISIBLE
+        statusText.text = "پیش‌نمایش زندهٔ رنگ در حال به‌روزرسانی است…"
+        worker.execute {
+            var retriever: MediaMetadataRetriever? = null
+            try {
+                retriever = MediaMetadataRetriever()
+                retriever.setDataSource(this, source)
+                val frame = retriever.getFrameAtTime(position * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (frame != null) {
+                    val tinted = tintBitmap(frame, current)
+                    if (!frame.isRecycled) frame.recycle()
+                    mainHandler.post {
+                        if (request == playerPreviewRequest && !isFinishing) {
+                            playerColorPreview.setImageBitmap(tinted)
+                            playerColorPreview.visibility = View.VISIBLE
+                            statusText.text = "پیش‌نمایش رنگ روی اسلایدها و فریم فعلی پلیر به‌روز شد"
+                        } else if (!tinted.isRecycled) tinted.recycle()
+                    }
+                }
+            } catch (_: Exception) {
+                mainHandler.post {
+                    if (request == playerPreviewRequest) {
+                        playerColorPreview.visibility = View.GONE
+                        statusText.text = "پیش‌نمایش اسلایدها به‌روز شد؛ گرفتن فریم پلیر ممکن نشد"
+                    }
+                }
+            } finally { try { retriever?.release() } catch (_: Exception) {} }
+        }
+    }
+
+    private fun tintBitmap(source: Bitmap, profile: RgbProfile): Bitmap {
+        val w = source.width
+        val h = source.height
+        val pixels = IntArray(w * h)
+        source.getPixels(pixels, 0, w, 0, 0, w, h)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            pixels[i] = Color.argb(Color.alpha(c),
+                (Color.red(c) * profile.red).toInt().coerceIn(0, 255),
+                (Color.green(c) * profile.green).toInt().coerceIn(0, 255),
+                (Color.blue(c) * profile.blue).toInt().coerceIn(0, 255))
+        }
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.setPixels(pixels, 0, w, 0, 0, w, h) }
+    }
+
+    private fun currentRgbProfile() = RgbProfile(
+        findViewById<SeekBar>(R.id.redColorSeek).progress / 100f,
+        findViewById<SeekBar>(R.id.greenColorSeek).progress / 100f,
+        findViewById<SeekBar>(R.id.blueColorSeek).progress / 100f
+    )
+
+    /** Exports the full video with an independently saved RGB effect for each storyboard interval. */
     private fun exportColorizedVideo() {
         val source = selectedUri
-        if (source == null) {
-            Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_LONG).show()
-            return
+        if (source == null || videoDurationMs <= 0L) {
+            Toast.makeText(this, "ابتدا یک ویدیوی معتبر انتخاب کنید", Toast.LENGTH_LONG).show(); return
+        }
+        val sizeField = findViewById<android.widget.EditText>(R.id.targetSizeMb)
+        val targetMb = sizeField.text.toString().trim().replace(',', '.').toFloatOrNull()
+        if (targetMb == null || targetMb < 1f || targetMb > 4096f) {
+            sizeField.error = "حجم هدف را بین 1 تا 4096 مگابایت وارد کنید"; return
         }
         val button = findViewById<Button>(R.id.colorizePreviewButton)
         button.isEnabled = false
-        statusText.text = "در حال رنگی‌سازی و رمزگذاری ویدیوی خروجی؛ لطفاً برنامه را نبندید…"
+        statusText.text = "در حال آماده‌سازی خروجی رنگی؛ رنگ هر بازه و حجم هدف اعمال می‌شود…"
         val output = File(cacheDir, "evc_colorized_${System.currentTimeMillis()}.mp4")
         try {
-            // Manually adjustable RGB channel gains (0.00x–2.00x).
-            // This is a real frame effect, not AI-based natural colorization.
-            val redScale = findViewById<SeekBar>(R.id.redColorSeek).progress / 100f
-            val greenScale = findViewById<SeekBar>(R.id.greenColorSeek).progress / 100f
-            val blueScale = findViewById<SeekBar>(R.id.blueColorSeek).progress / 100f
-            val manualTint = RgbAdjustment.Builder()
-                .setRedScale(redScale)
-                .setGreenScale(greenScale)
-                .setBlueScale(blueScale)
+            val total = ROWS * FRAMES_PER_ROW
+            val neutral = RgbProfile(1f, 1f, 1f)
+            val items = (0 until total).mapNotNull { index ->
+                val startMs = videoDurationMs * index / total
+                val endMs = videoDurationMs * (index + 1) / total
+                if (endMs <= startMs) return@mapNotNull null
+                val profile = frameColorProfiles[index] ?: neutral
+                val effect = RgbAdjustment.Builder()
+                    .setRedScale(profile.red).setGreenScale(profile.green).setBlueScale(profile.blue).build()
+                val clippedMedia = MediaItem.Builder().setUri(source)
+                    .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(startMs).setEndPositionMs(endMs).build()).build()
+                EditedMediaItem.Builder(clippedMedia).setEffects(Effects(emptyList(), listOf(effect))).build()
+            }
+            if (items.isEmpty()) throw IllegalStateException("بازهٔ قابل خروجی پیدا نشد")
+            // Estimate video bitrate from target size and duration. Final size can vary with content and audio.
+            val totalBitsPerSecond = (targetMb.toDouble() * 1024.0 * 1024.0 * 8.0 / (videoDurationMs / 1000.0)).toInt()
+            val videoBitrate = (totalBitsPerSecond - 128_000).coerceIn(200_000, 20_000_000)
+            val encoderFactory = DefaultEncoderFactory.Builder(this)
+                .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(videoBitrate).build())
                 .build()
-            val effects = Effects(emptyList(), listOf(manualTint))
-            val item = EditedMediaItem.Builder(MediaItem.fromUri(source))
-                .setEffects(effects)
-                .build()
+            val composition = Composition.Builder(EditedMediaItemSequence.Builder(items).build()).build()
             val transformer = Transformer.Builder(this)
+                .setEncoderFactory(encoderFactory)
                 .addListener(object : Transformer.Listener {
                     override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                         activeTransformer = null
@@ -228,35 +387,28 @@ class MainActivity : Activity() {
                                 ?: throw IllegalStateException("ساخت فایل در Movies/EVC ممکن نشد")
                             contentResolver.openOutputStream(outUri)?.use { out -> FileInputStream(output).use { it.copyTo(out) } }
                                 ?: throw IllegalStateException("نوشتن فایل خروجی ناموفق بود")
-                            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                                contentResolver.update(outUri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
-                            }
+                            if (android.os.Build.VERSION.SDK_INT >= 29) contentResolver.update(outUri, ContentValues().apply {
+                                put(MediaStore.Video.Media.IS_PENDING, 0)
+                            }, null, null)
                             output.delete()
-                            statusText.text = "ویدیوی رنگی‌شده در Movies/EVC ذخیره شد؛ صدا نیز در خروجی حفظ می‌شود"
-                            Toast.makeText(this@MainActivity, "ویدیوی رنگی‌شده ذخیره شد", Toast.LENGTH_LONG).show()
+                            statusText.text = "خروجی رنگی در Movies/EVC ذخیره شد. حجم هدف حدود ${targetMb} MB بود؛ رمزگذاری مجدد انجام شد."
+                            Toast.makeText(this@MainActivity, "خروجی رنگی ذخیره شد؛ حجم نهایی ممکن است با هدف تفاوت داشته باشد", Toast.LENGTH_LONG).show()
                         } catch (e: Exception) {
-                            output.delete()
-                            statusText.text = "ذخیرهٔ ویدیوی رنگی‌شده ناموفق بود: ${e.message ?: "خطا"}"
+                            output.delete(); statusText.text = "ذخیرهٔ خروجی ناموفق بود: ${e.message ?: "خطا"}"
                             Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
                         }
                     }
-
                     override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                        activeTransformer = null
-                        output.delete()
-                        button.isEnabled = true
-                        statusText.text = "رنگی‌سازی ویدیو ناموفق بود: ${exportException.message ?: "خطای رمزگذاری"}"
+                        activeTransformer = null; output.delete(); button.isEnabled = true
+                        statusText.text = "خروجی رنگی ناموفق بود: ${exportException.message ?: "خطای رمزگذاری"}"
                         Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
                     }
-                })
-                .build()
+                }).build()
             activeTransformer = transformer
-            transformer.start(item, output.absolutePath)
+            transformer.start(composition, output.absolutePath)
         } catch (e: Exception) {
-            activeTransformer = null
-            output.delete()
-            button.isEnabled = true
-            statusText.text = "شروع رنگی‌سازی ناموفق بود: ${e.message ?: "خطا"}"
+            activeTransformer = null; output.delete(); button.isEnabled = true
+            statusText.text = "شروع خروجی رنگی ناموفق بود: ${e.message ?: "خطا"}"
             Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
         }
     }
@@ -324,28 +476,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_VIDEO || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
-        try {
-            val flags = data.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION
-            if (flags != 0) contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (_: Exception) { }
-        selectedUri = uri
-        selectingForExport = false
-        selectedForExportButtonReset()
-        timelineSplitPoints.clear()
-        deletedTimelineRanges.clear()
-        selectedTimelineRange = null
-        timelineView.setTimeline(0L, emptyList(), emptyList())
-        timelineView.setThumbnails(emptyList())
-        selectedFrames.clear()
-        frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
-        frameBitmaps.clear()
-        deletedStoryboardFrames.clear()
-        buildEmptyStoryboard()
-        emptyHint.visibility = View.VISIBLE
-        statusText.text = "در حال آماده‌سازی ویدیو و استخراج فریم‌ها…"
-        videoView.setVideoURI(uri)
-        videoView.requestFocus()
-        loadStoryboard(uri)
+        loadSelectedVideo(uri, true)
     }
 
     private fun buildEmptyStoryboard() {

@@ -97,3 +97,15 @@ This version does not cut video yet. The only app capability is selecting and pl
 ## EVC 0.2.19
 - Removed the human-scene and distinct-face detection modes, including their ML Kit dependencies.
 - Kept the time-based storyboard mode and existing manual RGB color controls.
+
+
+## v0.2.20 — Share videos into EVC
+- Adds EVC to Android's share targets for `video/*` content.
+- Shared video URIs are opened in the existing editor workflow; the original file is not modified.
+- The existing document picker remains available.
+
+
+## Version 0.2.21
+- Assign an RGB combination to one or multiple selected storyboard intervals. Select one slide for an individual combination, or several slides to apply the same combination to all of them.
+- Export the video with saved per-interval RGB effects using Media3 Transformer.
+- Enter a target output size in MB; the app estimates video bitrate from duration. Actual size may differ due to content and audio.

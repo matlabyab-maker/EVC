@@ -34,6 +34,13 @@
             android:id="@+id/videoView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
+        <ImageView
+            android:id="@+id/playerColorPreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:contentDescription="پیش‌نمایش رنگ فریم فعلی"
+            android:visibility="gone" />
         <TextView
             android:id="@+id/emptyHint"
             android:layout_width="match_parent"
@@ -248,11 +255,55 @@
     </LinearLayout>
 
     <Button
+        android:id="@+id/applyColorToSelectedButton"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:layout_marginTop="1dp"
+        android:text="ثبت این ترکیب رنگ برای اسلایدهای انتخابی"
+        android:textColor="#07142F"
+        android:textStyle="bold"
+        android:backgroundTint="#FFD21F" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="2dp">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="حجم هدف (MB):"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/targetSizeMb"
+            android:layout_width="100dp"
+            android:layout_height="38dp"
+            android:layout_marginStart="8dp"
+            android:inputType="numberDecimal"
+            android:singleLine="true"
+            android:text="20"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#B9D7FF"
+            android:hint="مثلاً 20"
+            android:selectAllOnFocus="true" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="6dp"
+            android:text="حجم تقریبی؛ نه تضمین دقیق"
+            android:textColor="#B9D7FF"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <Button
         android:id="@+id/colorizePreviewButton"
         android:layout_width="match_parent"
         android:layout_height="42dp"
         android:layout_marginTop="1dp"
-        android:text="اعمال تنظیمات دستی رنگ روی ویدیوی خروجی"
+        android:text="خروجی با رنگ‌های ذخیره‌شده و حجم هدف"
         android:textColor="#07142F"
         android:textStyle="bold"
         android:backgroundTint="#D7A6FF" />
