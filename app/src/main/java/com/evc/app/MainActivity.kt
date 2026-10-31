@@ -71,6 +71,8 @@ class MainActivity : Activity() {
     private var selectedTimelineRange: Pair<Long, Long>? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    // Keep timeline sampling independent so 120 storyboard frames cannot block the timeline strip.
+    private val timelineThumbnailWorker = Executors.newSingleThreadExecutor()
     private val selectedFrames = linkedSetOf<Int>()
     private val frameViews = mutableMapOf<Int, FrameLayout>()
     private val frameBitmaps = mutableMapOf<Int, Bitmap>()
@@ -356,7 +358,7 @@ class MainActivity : Activity() {
         }
         val button = findViewById<Button>(R.id.colorizePreviewButton)
         button.isEnabled = false
-        statusText.text = "در حال آماده‌سازی خروجی رنگی؛ رنگ هر بازه و حجم هدف اعمال می‌شود…"
+        statusText.text = "در حال ساخت خروجی با اعمال تغییرات رنگ و حجم هدف؛ رمزگذاری مجدد انجام می‌شود…"
         val output = File(cacheDir, "evc_colorized_${System.currentTimeMillis()}.mp4")
         try {
             val total = ROWS * FRAMES_PER_ROW
@@ -588,6 +590,10 @@ class MainActivity : Activity() {
                     timelineView.setTimeline(duration, timelineSplitPoints.toList(), deletedTimelineRanges)
                     statusText.text = if (duration > 0) "مدت ویدیو ${formatTime(duration)} • در حال استخراج فریم‌ها…" else "در حال استخراج فریم‌ها…"
                 }
+                // Generate a small, dedicated timeline strip first; it no longer waits for all 120
+                // storyboard images and is not rebuilt/sorted after every individual frame.
+                loadTimelineThumbnails(uri, duration, generation)
+
                 val count = ROWS * FRAMES_PER_ROW
                 for (index in 0 until count) {
                     if (generation != storyboardGeneration) break
@@ -595,34 +601,29 @@ class MainActivity : Activity() {
                     val rangeStart = storyboardStartMs.coerceIn(0L, duration)
                     val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else duration).coerceIn(rangeStart, duration)
                     val timestampMs = if (count <= 1) rangeStart else rangeStart + (rangeEnd - rangeStart) * index / count
-                    // Some containers/codecs return null for an exact sampled timestamp.
-                    // Retry nearby timestamps and a key-frame lookup before leaving a blank cell.
-                    var bitmap: Bitmap? = null
-                    val candidatesUs = listOf(
-                        timestampMs * 1000L,
-                        max(0L, timestampMs - 500L) * 1000L,
-                        (timestampMs + 500L).coerceAtMost(duration.coerceAtLeast(timestampMs)) * 1000L,
-                        max(0L, timestampMs - 1500L) * 1000L,
-                        (timestampMs + 1500L).coerceAtMost(duration.coerceAtLeast(timestampMs)) * 1000L
-                    ).distinct()
-                    for (candidateUs in candidatesUs) {
-                        bitmap = try { retriever.getFrameAtTime(candidateUs, MediaMetadataRetriever.OPTION_CLOSEST) } catch (_: Exception) { null }
-                        if (bitmap != null) break
-                    }
+                    // Decode at thumbnail resolution where Android supports it; fall back to a
+                    // normal frame decode on older Android versions. Only one cheap sync fallback.
+                    var bitmap: Bitmap? = try {
+                        if (android.os.Build.VERSION.SDK_INT >= 27) {
+                            retriever.getScaledFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST, 160, 100)
+                        } else {
+                            retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+                        }
+                    } catch (_: Exception) { null }
                     if (bitmap == null) {
-                        bitmap = try { retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) } catch (_: Exception) { null }
+                        bitmap = try {
+                            if (android.os.Build.VERSION.SDK_INT >= 27) {
+                                retriever.getScaledFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 160, 100)
+                            } else {
+                                retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                            }
+                        } catch (_: Exception) { null }
                     }
                     if (bitmap != null) {
                         val scaled = scaleBitmapPreservingAspect(bitmap, 160, 100)
                         mainHandler.post {
                             if (generation == storyboardGeneration) {
                                 frameBitmaps[index] = scaled
-                                timelineView.setThumbnails(frameBitmaps.entries.sortedBy { it.key }.map { entry ->
-                                    val rangeStart = storyboardStartMs.coerceIn(0L, duration)
-                                    val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else duration).coerceIn(rangeStart, duration)
-                                    val sampleTime = if (count <= 1) rangeStart else rangeStart + (rangeEnd - rangeStart) * entry.key / count
-                                    sampleTime to entry.value
-                                })
                                 val cell = frameViews[index]
                                 val image = cell?.getChildAt(0) as? ImageView
                                 image?.setImageBitmap(scaled)
@@ -640,6 +641,39 @@ class MainActivity : Activity() {
                 }
             } catch (_: Exception) {
                 mainHandler.post { if (generation == storyboardGeneration) statusText.text = "استخراج فریم‌ها ناموفق بود؛ پخش ویدیو همچنان در دسترس است" }
+            } finally { try { retriever?.release() } catch (_: Exception) { } }
+        }
+    }
+
+
+    /** Samples a compact strip independently from the slower 120-frame storyboard. */
+    private fun loadTimelineThumbnails(uri: Uri, durationMs: Long, generation: Int) {
+        timelineThumbnailWorker.execute {
+            var retriever: MediaMetadataRetriever? = null
+            val frames = mutableListOf<Pair<Long, Bitmap>>()
+            try {
+                retriever = MediaMetadataRetriever()
+                retriever.setDataSource(this, uri)
+                val sampleCount = 16
+                for (i in 0 until sampleCount) {
+                    if (generation != storyboardGeneration) break
+                    val time = if (sampleCount <= 1) 0L else durationMs * i / sampleCount
+                    val bitmap = try {
+                        if (android.os.Build.VERSION.SDK_INT >= 27) {
+                            retriever.getScaledFrameAtTime(time * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 135)
+                        } else {
+                            retriever.getFrameAtTime(time * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        }
+                    } catch (_: Exception) { null }
+                    if (bitmap != null) frames.add(time to scaleBitmapPreservingAspect(bitmap, 240, 135))
+                }
+                mainHandler.post {
+                    if (generation == storyboardGeneration) {
+                        timelineView.setThumbnails(frames)
+                    } else frames.forEach { if (!it.second.isRecycled) it.second.recycle() }
+                }
+            } catch (_: Exception) {
+                frames.forEach { if (!it.second.isRecycled) it.second.recycle() }
             } finally { try { retriever?.release() } catch (_: Exception) { } }
         }
     }
@@ -708,7 +742,7 @@ class MainActivity : Activity() {
 
     private fun selectedForExportButtonReset() {
         if (::selectForDeleteModeButton.isInitialized && ::selectForExportModeButton.isInitialized) updateStoryboardSelectionModeButtons()
-        if (findViewById<Button>(R.id.exportButton) != null) findViewById<Button>(R.id.exportButton).text = "ساخت ویدیوی خروجی از باقی‌مانده‌ها"
+        if (findViewById<Button>(R.id.exportButton) != null) findViewById<Button>(R.id.exportButton).text = "خروجی بدون تغییر کدک"
     }
 
     private fun setStoryboardSelectionMode(exportMode: Boolean) {
@@ -717,7 +751,7 @@ class MainActivity : Activity() {
         refreshSelectionStyles()
         updateSelectionText()
         updateStoryboardSelectionModeButtons()
-        findViewById<Button>(R.id.exportButton).text = if (exportMode) "ساخت خروجی از اسلایدهای انتخاب‌شده" else "ساخت ویدیوی خروجی از باقی‌مانده‌ها"
+        findViewById<Button>(R.id.exportButton).text = if (exportMode) "خروجی بدون تغییر کدک: اسلایدهای انتخاب‌شده" else "خروجی بدون تغییر کدک"
         statusText.text = if (exportMode) "حالت خروجی: اسلایدهای موردنظر را انتخاب کنید؛ فقط همان بازه‌ها خروجی می‌شوند" else "حالت حذف: اسلایدهای ناخواسته را انتخاب و سپس «حذف بازه‌ها» را بزنید"
     }
 
@@ -771,7 +805,7 @@ class MainActivity : Activity() {
         // Current version exports the remaining intervals without re-encoding.
         // The target-size/re-encoding mode will be added separately to avoid silently
         // changing codec or quality in the original-quality mode.
-        statusText.text = if (onlySelected) "در حال ساخت خروجی فقط از اسلایدهای انتخاب‌شده…" else "در حال ساخت ویدیوی خروجی از بازه‌های باقی‌مانده…"
+        statusText.text = if (onlySelected) "در حال ساخت خروجی بدون تغییر کدک از اسلایدهای انتخاب‌شده…" else "در حال ساخت خروجی بدون تغییر کدک از بازه‌های باقی‌مانده…"
         findViewById<Button>(R.id.exportButton).isEnabled = false
         worker.execute {
             var result: File? = null
@@ -1003,7 +1037,12 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
         invalidate()
     }
     fun setThumbnails(frames: List<Pair<Long, Bitmap>>) {
-        thumbnails = frames.filter { !it.second.isRecycled }.sortedBy { it.first }
+        val next = frames.filter { !it.second.isRecycled }.sortedBy { it.first }
+        val retained = next.map { it.second }.toSet()
+        thumbnails.map { it.second }.distinct().forEach { old ->
+            if (old !in retained && !old.isRecycled) old.recycle()
+        }
+        thumbnails = next
         invalidate()
     }
     fun setPlayhead(timeMs: Long) { playheadMs = timeMs.coerceIn(0L, durationMs); invalidate() }

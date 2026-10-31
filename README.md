@@ -120,3 +120,9 @@ This version does not cut video yet. The only app capability is selecting and pl
 
 ## Version 0.2.24
 - The `Cut` button records a split at the video player current position at the moment of the tap. Each tap can add another split point; duplicate positions are rejected.
+
+
+## EVC 0.2.26 — Timeline and storyboard thumbnail performance
+- Timeline strip now samples a compact set of 16 frames independently from storyboard extraction.
+- Storyboard thumbnail extraction uses scaled frame decoding on Android 8.1+ and only one fallback attempt.
+- Timeline thumbnails are no longer rebuilt from and sorted against all storyboard frames after each frame arrives.
