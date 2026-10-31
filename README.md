@@ -146,5 +146,6 @@ This version does not cut video yet. The only app capability is selecting and pl
 - No unrelated UI or export behavior changed.
 
 
-## Version 0.2.39
-Selected storyboard slides are now exported as separate video files. Each selected slide interval is muxed independently; selected intervals are no longer concatenated into one large output file. Files are saved under Movies/EVC without video re-encoding where the source codec allows stream-copy.
+## Version 0.2.40 — Separate selected storyboard exports
+
+Selected storyboard export now creates one MP4 file per selected storyboard cell. It no longer concatenates multiple selected cells into one continuous output. Files are saved under `Movies/EVC`. In stream-copy mode, exact boundaries remain limited by source keyframes; a selected interval without a usable keyframe may fail rather than be re-encoded.
