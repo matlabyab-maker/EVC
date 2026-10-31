@@ -80,3 +80,9 @@ This version does not cut video yet. The only app capability is selecting and pl
 - This is a color effect, not AI-based reconstruction of missing colors. It does not promise natural object-specific colors or restoration of original colors.
 - Export re-encodes the video, so original video codec/quality and file size are not guaranteed. The original source file remains unchanged.
 - The existing cut/export workflow is otherwise left untouched.
+
+
+## Version 0.2.17
+- Fix Media3 `Effects` package import for the video color effect.
+- Replace unavailable `RgbFilter.createSepiaFilter()` with a supported `RgbAdjustment` warm tint (red 1.12, green 1.00, blue 0.82).
+- No unrelated timeline/export timing changes.

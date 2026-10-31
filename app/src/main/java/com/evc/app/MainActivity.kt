@@ -41,13 +41,13 @@ import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Effects
+import androidx.media3.transformer.Effects
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ExportException
-import androidx.media3.effect.RgbFilter
+import androidx.media3.effect.RgbAdjustment
 import java.util.concurrent.Executors
 import java.io.File
 import java.io.FileInputStream
@@ -205,7 +205,12 @@ class MainActivity : Activity() {
         try {
             // A restrained warm sepia treatment is a real video-frame effect, not an AI
             // restoration model. It avoids the previous green-tinted thumbnail heuristic.
-            val effects = Effects(emptyList(), listOf(RgbFilter.createSepiaFilter()))
+            val warmTint = RgbAdjustment.Builder()
+                .setRedScale(1.12f)
+                .setGreenScale(1.00f)
+                .setBlueScale(0.82f)
+                .build()
+            val effects = Effects(emptyList(), listOf(warmTint))
             val item = EditedMediaItem.Builder(MediaItem.fromUri(source))
                 .setEffects(effects)
                 .build()
