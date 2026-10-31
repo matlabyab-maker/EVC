@@ -1,6 +1,7 @@
 package com.evc.app
 
 import android.app.Activity
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
@@ -137,6 +138,7 @@ class MainActivity : Activity() {
             timelineView.setTimeline(videoDurationMs, emptyList(), emptyList())
             statusText.text = "برش‌ها و حذف‌های نوار زمان بازگردانی شدند"
         }
+        findViewById<Button>(R.id.exportSegmentsSeparatelyButton).setOnClickListener { exportTimelineSegmentsSeparately() }
 
         findViewById<Button>(R.id.openButton).setOnClickListener { chooseVideo() }
         findViewById<Button>(R.id.selectAllButton).setOnClickListener {
@@ -163,6 +165,8 @@ class MainActivity : Activity() {
         setupManualColorControls()
         timeModeButton.setOnClickListener { showTimeMode() }
         findViewById<Button>(R.id.applyStoryboardTimeRangeButton).setOnClickListener { applyStoryboardTimeRange() }
+        findViewById<Button>(R.id.pickStoryboardStartButton).setOnClickListener { showStoryboardTimePicker(true) }
+        findViewById<Button>(R.id.pickStoryboardEndButton).setOnClickListener { showStoryboardTimePicker(false) }
 
         val controller = MediaController(this)
         controller.setAnchorView(videoView)
@@ -706,6 +710,28 @@ class MainActivity : Activity() {
         } catch (_: Exception) { null }
     }
 
+    /** Opens a native time picker for the storyboard start/end, while keeping manual text entry available. */
+    private fun showStoryboardTimePicker(isStart: Boolean) {
+        if (videoDurationMs <= 0L) {
+            Toast.makeText(this, "ابتدا ویدیو را انتخاب کنید", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val fieldId = if (isStart) R.id.storyboardStartTime else R.id.storyboardEndTime
+        val field = findViewById<android.widget.EditText>(fieldId)
+        val currentMs = parseTimeInput(field.text.toString()) ?: if (isStart) storyboardStartMs else storyboardEndMs
+        val totalMinutes = (currentMs / 60000L).toInt().coerceAtLeast(0)
+        val hour = (totalMinutes / 60) % 24
+        val minute = totalMinutes % 60
+        TimePickerDialog(this, { _, selectedHour, selectedMinute ->
+            val pickedMs = (selectedHour * 3600L + selectedMinute * 60L) * 1000L
+            field.setText(formatTime(pickedMs.coerceAtMost(videoDurationMs)))
+            field.error = null
+        }, hour, minute, true).apply {
+            setTitle(if (isStart) "زمان شروع نمایش اسلایدها" else "زمان پایان نمایش اسلایدها")
+            show()
+        }
+    }
+
     private fun applyStoryboardTimeRange() {
         val uri = selectedUri
         if (uri == null || videoDurationMs <= 0L) {
@@ -784,6 +810,68 @@ class MainActivity : Activity() {
         Toast.makeText(this, "بازه‌های زمانی این اسلایدها از ویدیوی خروجی حذف می‌شوند؛ فایل اصلی دست‌نخورده می‌ماند", Toast.LENGTH_LONG).show()
     }
 
+
+    /** Saves every Cut-delimited timeline interval as its own file, stream-copying tracks without re-encoding. */
+    private fun exportTimelineSegmentsSeparately() {
+        val source = selectedUri
+        if (source == null || videoDurationMs <= 0L) {
+            Toast.makeText(this, "ابتدا یک ویدیوی معتبر انتخاب کنید", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val boundaries = (listOf(0L) + timelineSplitPoints.filter { it > 0L && it < videoDurationMs } + listOf(videoDurationMs)).distinct().sorted()
+        if (boundaries.size < 2) {
+            Toast.makeText(this, "ابتدا با دکمهٔ Cut نقاط تقسیم را روی نوار زمان ثبت کنید", Toast.LENGTH_LONG).show()
+            return
+        }
+        val deleted = synchronized(deletedTimelineRanges) { deletedTimelineRanges.toList() }
+        val segments = (0 until boundaries.size - 1).map { boundaries[it] to boundaries[it + 1] }
+            .filter { (a, b) -> b > a && deleted.none { d -> d.first <= a && d.second >= b } }
+        if (segments.isEmpty()) {
+            Toast.makeText(this, "قطعهٔ قابل ذخیره‌ای باقی نمانده است", Toast.LENGTH_LONG).show()
+            return
+        }
+        val button = findViewById<Button>(R.id.exportSegmentsSeparatelyButton)
+        button.isEnabled = false
+        statusText.text = "در حال ذخیرهٔ ${segments.size} قطعه به‌صورت فایل‌های جداگانه و بدون رمزگذاری مجدد…"
+        worker.execute {
+            var saved = 0
+            val errors = mutableListOf<String>()
+            segments.forEachIndexed { index, range ->
+                var temp: File? = null
+                var outUri: Uri? = null
+                try {
+                    temp = muxRemainingRanges(source, listOf(range))
+                    val values = ContentValues().apply {
+                        put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_segment_${(index + 1).toString().padStart(3, '0')}_${System.currentTimeMillis()}.mp4")
+                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        if (android.os.Build.VERSION.SDK_INT >= 29) {
+                            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
+                            put(MediaStore.Video.Media.IS_PENDING, 1)
+                        }
+                    }
+                    outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                        ?: throw IllegalStateException("ساخت فایل قطعهٔ ${index + 1} ناموفق بود")
+                    contentResolver.openOutputStream(outUri)?.use { output -> FileInputStream(temp).use { input -> input.copyTo(output) } }
+                        ?: throw IllegalStateException("نوشتن قطعهٔ ${index + 1} ناموفق بود")
+                    if (android.os.Build.VERSION.SDK_INT >= 29) {
+                        val done = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
+                        contentResolver.update(outUri, done, null, null)
+                    }
+                    saved++
+                } catch (e: Exception) {
+                    outUri?.let { try { contentResolver.delete(it, null, null) } catch (_: Exception) { } }
+                    errors.add("قطعهٔ ${index + 1}: ${e.message ?: e.javaClass.simpleName}")
+                } finally {
+                    temp?.delete()
+                }
+            }
+            mainHandler.post {
+                button.isEnabled = true
+                statusText.text = if (errors.isEmpty()) "$saved قطعه به‌صورت فایل‌های جداگانه در Movies/EVC ذخیره شد؛ بدون رمزگذاری مجدد" else "$saved قطعه ذخیره شد؛ ${errors.size} قطعه ناموفق بود: ${errors.first()}"
+                Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     private fun exportRemainingVideo(onlySelected: Boolean = false) {
         val source = selectedUri

@@ -126,3 +126,11 @@ This version does not cut video yet. The only app capability is selecting and pl
 - Timeline strip now samples a compact set of 16 frames independently from storyboard extraction.
 - Storyboard thumbnail extraction uses scaled frame decoding on Android 8.1+ and only one fallback attempt.
 - Timeline thumbnails are no longer rebuilt from and sorted against all storyboard frames after each frame arrives.
+
+
+## Version 0.2.27
+- Added a button to save each interval separated by Cut markers as an individual MP4 in Movies/EVC, using stream-copy without video re-encoding. Intervals fully marked for deletion are skipped.
+
+
+## Version 0.2.28
+- Restores explicit storyboard time selection with native start/end time pickers. Manual time entry remains available; apply the chosen range to reload storyboard frames.

@@ -78,6 +78,33 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingTop="1dp"
+        android:paddingBottom="1dp">
+        <Button
+            android:id="@+id/pickStoryboardStartButton"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:text="انتخاب زمان شروع"
+            android:textSize="10sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#43D9A3" />
+        <Button
+            android:id="@+id/pickStoryboardEndButton"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:text="انتخاب زمان پایان"
+            android:textSize="10sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#43D9A3" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="1dp"
         android:paddingBottom="2dp">
         <EditText
             android:id="@+id/storyboardStartTime"
@@ -248,6 +275,16 @@
             android:textColor="#07142F"
             android:backgroundTint="#43D9A3" />
     </LinearLayout>
+
+    <Button
+        android:id="@+id/exportSegmentsSeparatelyButton"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:layout_marginTop="2dp"
+        android:text="ذخیرهٔ هر فاصلهٔ زمانی در فایل جداگانه (بدون تغییر کدک)"
+        android:textSize="11sp"
+        android:textColor="#07142F"
+        android:backgroundTint="#43D9A3" />
 
     <ScrollView
         android:layout_width="match_parent"
