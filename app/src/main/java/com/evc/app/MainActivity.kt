@@ -78,6 +78,8 @@ class MainActivity : Activity() {
     private var selectedUri: Uri? = null
     private var activeTransformer: Transformer? = null
     private var videoDurationMs = 0L
+    private var storyboardStartMs = 0L
+    private var storyboardEndMs = 0L
     private var storyboardGeneration = 0
     private data class RgbProfile(val red: Float, val green: Float, val blue: Float)
     private val frameColorProfiles = mutableMapOf<Int, RgbProfile>()
@@ -105,11 +107,19 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.splitTimelineButton).setOnClickListener {
             if (videoDurationMs <= 0L) { Toast.makeText(this, "ابتدا ویدیو انتخاب کنید", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
             if (videoDurationMs < 2L) { Toast.makeText(this, "مدت ویدیو برای برش کافی نیست", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            val at = timelineView.playheadMs.coerceIn(1L, videoDurationMs - 1L)
+            // Cut at the actual player position at the instant the button is tapped,
+            // not the last position manually selected on the timeline.
+            val currentPosition = try { videoView.currentPosition.toLong() } catch (_: Exception) { timelineView.playheadMs }
+            if (currentPosition <= 0L || currentPosition >= videoDurationMs) {
+                Toast.makeText(this, "ویدیو را به زمان موردنظر پخش یا جابه‌جا کنید و دوباره Cut بزنید", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val at = currentPosition.coerceIn(1L, videoDurationMs - 1L)
             if (timelineSplitPoints.add(at)) {
+                timelineView.setPlayhead(at)
                 timelineView.setTimeline(videoDurationMs, timelineSplitPoints.toList(), deletedTimelineRanges)
                 selectedTimelineRange = null
-                statusText.text = "برش در ${formatTime(at)} ثبت شد؛ برای انتخاب قطعه روی نوار بزنید"
+                statusText.text = "Cut ثبت شد: ${formatTime(at)}؛ با هر بار زدن، برش دیگری در زمان فعلی پخش ثبت می‌شود"
             } else Toast.makeText(this, "در این زمان برشی ثبت شده است", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.deleteTimelineSegmentButton).setOnClickListener {
@@ -150,6 +160,7 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.colorizePreviewButton).setOnClickListener { exportColorizedVideo() }
         setupManualColorControls()
         timeModeButton.setOnClickListener { showTimeMode() }
+        findViewById<Button>(R.id.applyStoryboardTimeRangeButton).setOnClickListener { applyStoryboardTimeRange() }
 
         val controller = MediaController(this)
         controller.setAnchorView(videoView)
@@ -196,6 +207,8 @@ class MainActivity : Activity() {
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
         }
         selectedUri = uri
+        storyboardStartMs = 0L
+        storyboardEndMs = 0L
         selectingForExport = false
         selectedForExportButtonReset()
         timelineSplitPoints.clear()
@@ -495,7 +508,7 @@ class MainActivity : Activity() {
                 val index = row * FRAMES_PER_ROW + col
                 if (index in deletedStoryboardFrames) continue
                 val cell = makeFrameCell(index, null, "${index + 1}")
-                strip.addView(cell, LinearLayout.LayoutParams(dp(74), dp(56)).apply { setMargins(0, 0, 0, 0) })
+                strip.addView(cell, LinearLayout.LayoutParams(dp(62), dp(48)).apply { setMargins(0, 0, dp(1), 0) })
                 frameViews[index] = cell
             }
             horizontal.addView(strip)
@@ -507,10 +520,10 @@ class MainActivity : Activity() {
     private fun makeFrameCell(index: Int, bitmap: Bitmap?, label: String): FrameLayout {
         val cell = FrameLayout(this)
         cell.background = GradientDrawable().apply {
-            setColor(Color.rgb(18, 35, 65)); cornerRadius = dp(5).toFloat()
+            setColor(Color.rgb(18, 35, 65)); cornerRadius = dp(2).toFloat()
         }
         val image = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
+            scaleType = ImageView.ScaleType.FIT_CENTER
             if (bitmap != null) setImageBitmap(bitmap) else setImageResource(android.R.drawable.ic_media_play)
             if (bitmap == null) setColorFilter(Color.rgb(116, 150, 198))
             contentDescription = "فریم ${index + 1}"
@@ -538,7 +551,9 @@ class MainActivity : Activity() {
             if (!selectedFrames.add(index)) selectedFrames.remove(index)
             refreshCellStyle(index)
             updateSelectionText()
-            val timeMs = videoDurationMs * index / (ROWS * FRAMES_PER_ROW)
+            val rangeStart = storyboardStartMs.coerceIn(0L, videoDurationMs)
+            val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else videoDurationMs).coerceIn(rangeStart, videoDurationMs)
+            val timeMs = rangeStart + (rangeEnd - rangeStart) * index / (ROWS * FRAMES_PER_ROW)
             timelineView.setPlayhead(timeMs)
             try { videoView.seekTo(timeMs.toInt()) } catch (_: Exception) { }
         }
@@ -547,7 +562,7 @@ class MainActivity : Activity() {
 
     private fun makeBorder(selected: Boolean): GradientDrawable = GradientDrawable().apply {
         setColor(Color.TRANSPARENT)
-        cornerRadius = dp(5).toFloat()
+        cornerRadius = dp(2).toFloat()
         setStroke(dp(if (selected) 4 else 1), if (selected) Color.rgb(255, 210, 31) else Color.rgb(61, 91, 135))
     }
 
@@ -562,6 +577,12 @@ class MainActivity : Activity() {
                 mainHandler.post {
                     if (generation != storyboardGeneration) return@post
                     videoDurationMs = duration
+                    if (storyboardEndMs <= storyboardStartMs || storyboardEndMs > duration) {
+                        storyboardStartMs = 0L
+                        storyboardEndMs = duration
+                        findViewById<android.widget.EditText>(R.id.storyboardStartTime).setText("00:00")
+                        findViewById<android.widget.EditText>(R.id.storyboardEndTime).setText(formatTime(duration))
+                    }
                     // Initialize the timeline with the selected video's duration.
                     // Without this, TimelineView remains in its empty state and cannot draw thumbnails.
                     timelineView.setTimeline(duration, timelineSplitPoints.toList(), deletedTimelineRanges)
@@ -571,7 +592,9 @@ class MainActivity : Activity() {
                 for (index in 0 until count) {
                     if (generation != storyboardGeneration) break
                     if (index in deletedStoryboardFrames) continue
-                    val timestampMs = if (count <= 1) 0L else duration * index / count
+                    val rangeStart = storyboardStartMs.coerceIn(0L, duration)
+                    val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else duration).coerceIn(rangeStart, duration)
+                    val timestampMs = if (count <= 1) rangeStart else rangeStart + (rangeEnd - rangeStart) * index / count
                     // Some containers/codecs return null for an exact sampled timestamp.
                     // Retry nearby timestamps and a key-frame lookup before leaving a blank cell.
                     var bitmap: Bitmap? = null
@@ -590,14 +613,14 @@ class MainActivity : Activity() {
                         bitmap = try { retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) } catch (_: Exception) { null }
                     }
                     if (bitmap != null) {
-                        val sourceBitmap = bitmap
-                        val scaled = Bitmap.createScaledBitmap(sourceBitmap, 220, 132, true)
-                        if (scaled !== sourceBitmap) sourceBitmap.recycle()
+                        val scaled = scaleBitmapPreservingAspect(bitmap, 160, 100)
                         mainHandler.post {
                             if (generation == storyboardGeneration) {
                                 frameBitmaps[index] = scaled
                                 timelineView.setThumbnails(frameBitmaps.entries.sortedBy { it.key }.map { entry ->
-                                    val sampleTime = if (count <= 1) 0L else duration * entry.key / count
+                                    val rangeStart = storyboardStartMs.coerceIn(0L, duration)
+                                    val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else duration).coerceIn(rangeStart, duration)
+                                    val sampleTime = if (count <= 1) rangeStart else rangeStart + (rangeEnd - rangeStart) * entry.key / count
                                     sampleTime to entry.value
                                 })
                                 val cell = frameViews[index]
@@ -612,7 +635,7 @@ class MainActivity : Activity() {
                 }
                 mainHandler.post {
                     if (generation == storyboardGeneration) {
-                        statusText.text = "استوری‌بورد زمانی آماده است: ۶ ردیف × ۱۵ فریم"
+                        statusText.text = "استوری‌بورد زمانی آماده است: ۸ ردیف × ۱۵ فریم"
                     }
                 }
             } catch (_: Exception) {
@@ -622,10 +645,65 @@ class MainActivity : Activity() {
     }
 
     private fun showTimeMode() {
+        storyboardStartMs = 0L
+        storyboardEndMs = videoDurationMs
+        findViewById<android.widget.EditText>(R.id.storyboardStartTime).setText("00:00")
+        findViewById<android.widget.EditText>(R.id.storyboardEndTime).setText(formatTime(videoDurationMs))
         frameViews.forEach { (index, view) -> view.visibility = if (index in deletedStoryboardFrames) View.GONE else View.VISIBLE }
         updateModeButtons()
         updateStoryboardSelectionModeButtons()
-        statusText.text = "نمایش زمانی: فریم‌ها در طول ویدیو با فاصلهٔ زمانی نمونه‌برداری شده‌اند"
+        val uri = selectedUri
+        if (uri != null && videoDurationMs > 0L) reloadStoryboardForRange(uri)
+        statusText.text = "نمایش زمانی کامل: از 00:00 تا ${formatTime(videoDurationMs)}"
+    }
+
+    private fun parseTimeInput(value: String): Long? {
+        val text = value.trim()
+        if (text.isEmpty()) return null
+        return try {
+            val parts = text.split(":")
+            val seconds = when (parts.size) {
+                1 -> parts[0].toLong()
+                2 -> parts[0].toLong() * 60L + parts[1].toLong()
+                3 -> parts[0].toLong() * 3600L + parts[1].toLong() * 60L + parts[2].toLong()
+                else -> return null
+            }
+            if (parts.any { it.toLongOrNull() == null } || seconds < 0L) null else seconds * 1000L
+        } catch (_: Exception) { null }
+    }
+
+    private fun applyStoryboardTimeRange() {
+        val uri = selectedUri
+        if (uri == null || videoDurationMs <= 0L) {
+            Toast.makeText(this, "ابتدا ویدیو را انتخاب کنید", Toast.LENGTH_SHORT).show(); return
+        }
+        val start = parseTimeInput(findViewById<android.widget.EditText>(R.id.storyboardStartTime).text.toString())
+        val end = parseTimeInput(findViewById<android.widget.EditText>(R.id.storyboardEndTime).text.toString())
+        if (start == null || end == null || start >= end || end > videoDurationMs) {
+            findViewById<android.widget.EditText>(R.id.storyboardEndTime).error = "زمان پایان باید بعد از شروع و در محدودهٔ ویدیو باشد"
+            Toast.makeText(this, "زمان را به‌شکل دقیقه:ثانیه وارد کنید؛ مثلاً 01:25", Toast.LENGTH_LONG).show(); return
+        }
+        storyboardStartMs = start
+        storyboardEndMs = end
+        reloadStoryboardForRange(uri)
+        statusText.text = "استوری‌بورد بازهٔ ${formatTime(start)} تا ${formatTime(end)} در حال آماده‌سازی است"
+    }
+
+    private fun reloadStoryboardForRange(uri: Uri) {
+        frameBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
+        frameBitmaps.clear()
+        timelineView.setThumbnails(emptyList())
+        previewBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
+        previewBitmaps.clear()
+        loadStoryboard(uri)
+    }
+
+    private fun scaleBitmapPreservingAspect(source: Bitmap, maxWidth: Int = 160, maxHeight: Int = 100): Bitmap {
+        val scale = minOf(maxWidth.toFloat() / source.width, maxHeight.toFloat() / source.height, 1f)
+        val width = (source.width * scale).toInt().coerceAtLeast(1)
+        val height = (source.height * scale).toInt().coerceAtLeast(1)
+        if (width == source.width && height == source.height) return source
+        return Bitmap.createScaledBitmap(source, width, height, true).also { if (it !== source && !source.isRecycled) source.recycle() }
     }
 
     private fun selectedForExportButtonReset() {
@@ -869,7 +947,11 @@ class MainActivity : Activity() {
     }
     private fun formatTime(ms: Long): String {
         val seconds = max(0L, ms / 1000L)
-        return String.format("%02d:%02d", seconds / 60, seconds % 60)
+        val hours = seconds / 3600L
+        val minutes = (seconds % 3600L) / 60L
+        val secs = seconds % 60L
+        return if (hours > 0L) String.format("%02d:%02d:%02d", hours, minutes, secs)
+        else String.format("%02d:%02d", minutes, secs)
     }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
@@ -910,6 +992,7 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
     private var initialZoom = 1f
     private var moved = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8, 17, 32) }
     private val density = resources.displayMetrics.density
 
     fun setTimeline(duration: Long, cuts: List<Long>, deleted: List<Pair<Long, Long>>) {
@@ -947,8 +1030,7 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
         if (thumbnails.isNotEmpty()) {
             val save = canvas.save()
             canvas.clipRect(left, top, right, bottom)
-            // Keep each thumbnail's aspect ratio. Crop the source bitmap to the
-            // destination cell's aspect ratio instead of stretching it to fit.
+            // Preserve the complete source frame inside each time cell; no stretch or crop.
             thumbnails.forEachIndexed { index, frame ->
                 val centerX = xAt(frame.first)
                 val prevX = if (index == 0) left else (xAt(thumbnails[index - 1].first) + centerX) / 2f
@@ -957,19 +1039,19 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
                 val dst = RectF(max(left, prevX), top, minOf(right, nextX), bottom)
                 if (dst.width() > 0f && dst.height() > 0f) {
                     val bitmap = frame.second
-                    val targetRatio = dst.width() / dst.height()
                     val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-                    val srcRect = if (bitmapRatio > targetRatio) {
-                        val cropWidth = (bitmap.height * targetRatio).toInt().coerceIn(1, bitmap.width)
-                        val cropLeft = (bitmap.width - cropWidth) / 2
-                        Rect(cropLeft, 0, cropLeft + cropWidth, bitmap.height)
+                    val targetRatio = dst.width() / dst.height()
+                    // Fit the whole frame inside its time cell; never stretch or crop the source image.
+                    val fitted = if (bitmapRatio > targetRatio) {
+                        val fittedHeight = dst.width() / bitmapRatio
+                        RectF(dst.left, dst.centerY() - fittedHeight / 2f, dst.right, dst.centerY() + fittedHeight / 2f)
                     } else {
-                        val cropHeight = (bitmap.width / targetRatio).toInt().coerceIn(1, bitmap.height)
-                        val cropTop = (bitmap.height - cropHeight) / 2
-                        Rect(0, cropTop, bitmap.width, cropTop + cropHeight)
+                        val fittedWidth = dst.height() * bitmapRatio
+                        RectF(dst.centerX() - fittedWidth / 2f, dst.top, dst.centerX() + fittedWidth / 2f, dst.bottom)
                     }
                     paint.color = Color.WHITE
-                    canvas.drawBitmap(bitmap, srcRect, dst, paint)
+                    canvas.drawRect(dst, backgroundPaint)
+                    canvas.drawBitmap(bitmap, null, fitted, paint)
                 }
             }
             canvas.restoreToCount(save)

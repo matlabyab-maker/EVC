@@ -78,6 +78,58 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingTop="1dp"
+        android:paddingBottom="2dp">
+        <EditText
+            android:id="@+id/storyboardStartTime"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:hint="شروع 00:00"
+            android:text="00:00"
+            android:singleLine="true"
+            android:inputType="text"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#B9D7FF"
+            android:textSize="11sp"
+            android:padding="4dp"
+            android:backgroundTint="#FFD21F" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="تا"
+            android:textColor="#B9D7FF"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp" />
+        <EditText
+            android:id="@+id/storyboardEndTime"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:hint="پایان 01:00"
+            android:text="01:00"
+            android:singleLine="true"
+            android:inputType="text"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#B9D7FF"
+            android:textSize="11sp"
+            android:padding="4dp"
+            android:backgroundTint="#FFD21F" />
+        <Button
+            android:id="@+id/applyStoryboardTimeRangeButton"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:text="اعمال زمان"
+            android:textSize="10sp"
+            android:textColor="#07142F"
+            android:backgroundTint="#43D9A3" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="1dp"
         android:paddingBottom="1dp">
         <TextView
             android:id="@+id/selectionText"
@@ -172,7 +224,7 @@
             android:layout_width="0dp"
             android:layout_height="34dp"
             android:layout_weight="1"
-            android:text="برش در نشانگر"
+            android:text="Cut"
             android:textSize="10sp"
             android:textColor="#07142F"
             android:backgroundTint="#FFD21F" />

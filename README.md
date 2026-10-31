@@ -109,3 +109,14 @@ This version does not cut video yet. The only app capability is selecting and pl
 - Assign an RGB combination to one or multiple selected storyboard intervals. Select one slide for an individual combination, or several slides to apply the same combination to all of them.
 - Export the video with saved per-interval RGB effects using Media3 Transformer.
 - Enter a target output size in MB; the app estimates video bitrate from duration. Actual size may differ due to content and audio.
+
+
+## Version 0.2.23
+- Restored manual storyboard time-range selection using `MM:SS` or `HH:MM:SS` start/end fields.
+- Storyboard samples now come from the selected time range.
+- Preserved source-frame aspect ratio in storyboard cells and timeline thumbnails; timeline frames are fitted without stretching or cropping.
+- Reduced storyboard thumbnail cell size and corner rounding for a more compact natural layout.
+
+
+## Version 0.2.24
+- The `Cut` button records a split at the video player current position at the moment of the tap. Each tap can add another split point; duplicate positions are rejected.
