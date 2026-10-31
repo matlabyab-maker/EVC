@@ -3,6 +3,7 @@ package com.evc.app
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.content.ContentValues
