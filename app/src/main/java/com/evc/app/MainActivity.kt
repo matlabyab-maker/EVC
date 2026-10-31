@@ -514,7 +514,7 @@ class MainActivity : Activity() {
                 val index = row * FRAMES_PER_ROW + col
                 if (index in deletedStoryboardFrames) continue
                 val cell = makeFrameCell(index, null, "${index + 1}")
-                strip.addView(cell, LinearLayout.LayoutParams(dp(62), dp(48)).apply { setMargins(0, 0, dp(1), 0) })
+                strip.addView(cell, LinearLayout.LayoutParams(dp(62), dp(40)).apply { setMargins(0, 0, dp(1), 0) })
                 frameViews[index] = cell
             }
             horizontal.addView(strip)
