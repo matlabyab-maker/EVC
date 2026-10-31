@@ -134,3 +134,7 @@ This version does not cut video yet. The only app capability is selecting and pl
 
 ## Version 0.2.28
 - Restores explicit storyboard time selection with native start/end time pickers. Manual time entry remains available; apply the chosen range to reload storyboard frames.
+
+
+## Version 0.2.32
+- Storyboard start/end buttons now capture the current playback position directly; no time-picker dialog opens.

@@ -1,7 +1,6 @@
 package com.evc.app
 
 import android.app.Activity
-import android.app.TimePickerDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
@@ -165,8 +164,8 @@ class MainActivity : Activity() {
         setupManualColorControls()
         timeModeButton.setOnClickListener { showTimeMode() }
         findViewById<Button>(R.id.applyStoryboardTimeRangeButton).setOnClickListener { applyStoryboardTimeRange() }
-        findViewById<Button>(R.id.pickStoryboardStartButton).setOnClickListener { showStoryboardTimePicker(true) }
-        findViewById<Button>(R.id.pickStoryboardEndButton).setOnClickListener { showStoryboardTimePicker(false) }
+        findViewById<Button>(R.id.pickStoryboardStartButton).setOnClickListener { setStoryboardTimeFromPlayback(true) }
+        findViewById<Button>(R.id.pickStoryboardEndButton).setOnClickListener { setStoryboardTimeFromPlayback(false) }
 
         val controller = MediaController(this)
         controller.setAnchorView(videoView)
@@ -710,25 +709,23 @@ class MainActivity : Activity() {
         } catch (_: Exception) { null }
     }
 
-    /** Opens a native time picker for the storyboard start/end, while keeping manual text entry available. */
-    private fun showStoryboardTimePicker(isStart: Boolean) {
-        if (videoDurationMs <= 0L) {
+    /** Sets the storyboard range endpoint to the current playback position without opening a dialog. */
+    private fun setStoryboardTimeFromPlayback(isStart: Boolean) {
+        if (selectedUri == null || videoDurationMs <= 0L) {
             Toast.makeText(this, "ابتدا ویدیو را انتخاب کنید", Toast.LENGTH_SHORT).show()
             return
         }
+        val position = try { videoView.currentPosition.toLong() } catch (_: Exception) { timelineView.playheadMs }
+        val at = position.coerceIn(0L, videoDurationMs)
         val fieldId = if (isStart) R.id.storyboardStartTime else R.id.storyboardEndTime
-        val field = findViewById<android.widget.EditText>(fieldId)
-        val currentMs = parseTimeInput(field.text.toString()) ?: if (isStart) storyboardStartMs else storyboardEndMs
-        val totalMinutes = (currentMs / 60000L).toInt().coerceAtLeast(0)
-        val hour = (totalMinutes / 60) % 24
-        val minute = totalMinutes % 60
-        TimePickerDialog(this, { _, selectedHour, selectedMinute ->
-            val pickedMs = (selectedHour * 3600L + selectedMinute * 60L) * 1000L
-            field.setText(formatTime(pickedMs.coerceAtMost(videoDurationMs)))
-            field.error = null
-        }, hour, minute, true).apply {
-            setTitle(if (isStart) "زمان شروع نمایش اسلایدها" else "زمان پایان نمایش اسلایدها")
-            show()
+        findViewById<android.widget.EditText>(fieldId).apply {
+            setText(formatTime(at))
+            error = null
+        }
+        statusText.text = if (isStart) {
+            "زمان شروع استوری‌بورد روی ${formatTime(at)} ثبت شد؛ برای نمایش بازه، «اعمال زمان» را بزنید"
+        } else {
+            "زمان پایان استوری‌بورد روی ${formatTime(at)} ثبت شد؛ برای نمایش بازه، «اعمال زمان» را بزنید"
         }
     }
 
