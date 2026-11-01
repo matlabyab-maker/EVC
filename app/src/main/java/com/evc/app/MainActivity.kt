@@ -971,6 +971,10 @@ class MainActivity : Activity() {
 
     private fun setStoryboardSelectionMode(exportMode: Boolean) {
         selectingForExport = exportMode
+        // A previously selected timeline segment must not override storyboard selection.
+        // The export button is shared by both workflows, so clear that stale selection
+        // whenever the user explicitly switches to storyboard export/delete mode.
+        selectedTimelineRange = null
         selectedFrames.clear()
         refreshSelectionStyles()
         updateSelectionText()
@@ -1132,17 +1136,19 @@ class MainActivity : Activity() {
     }
 
     private fun exportRemainingVideo(onlySelected: Boolean = false) {
+        // Storyboard selection has explicit priority when its mode is active. Do this
+        // BEFORE checking the timeline range: a stale timeline selection must never
+        // redirect a storyboard export into the whole-video/timeline export path.
+        if (onlySelected) {
+            selectedTimelineRange = null
+            exportSelectedStoryboardFramesSeparately()
+            return
+        }
         // A range explicitly selected on the timeline belongs to the timeline section.
         // Export only that range; never mix it with storyboard deletions or other ranges.
         val timelineRange = selectedTimelineRange
         if (timelineRange != null) {
             exportOnlyTimelineRange(timelineRange)
-            return
-        }
-        // Selected storyboard slides must be exported as independent files, not muxed
-        // into one continuous file. Keep the normal whole-video export path unchanged.
-        if (onlySelected) {
-            exportSelectedStoryboardFramesSeparately()
             return
         }
         val source = selectedUri
@@ -1569,7 +1575,7 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val left = 8f * density; val right = width - left
-        val top = height * .30f; val bottom = height * .72f
+        val top = height * .12f; val bottom = height * .88f
         paint.color = Color.rgb(37, 69, 111); canvas.drawRoundRect(left, top, right, bottom, 5f * density, 5f * density, paint)
         if (durationMs <= 0L) {
             paint.color = Color.LTGRAY; paint.textSize = 11f * density

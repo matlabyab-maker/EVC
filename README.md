@@ -162,3 +162,8 @@ Selected storyboard export now creates one MP4 file per selected storyboard cell
 
 ## v0.2.51
 - Storyboard slide exports now seek forward to the selected interval’s own sync frame to avoid including samples from the preceding slide.
+
+
+## v0.2.52 — Storyboard export selection priority
+- Storyboard export mode now takes priority over any stale timeline range selection.
+- Switching storyboard mode clears the previous timeline range so only explicitly selected storyboard slides are exported.
