@@ -1,8 +1,10 @@
 package com.evc.app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -85,6 +87,10 @@ class MainActivity : Activity() {
     private var storyboardGeneration = 0
     private data class RgbProfile(val red: Float, val green: Float, val blue: Float)
     private val frameColorProfiles = mutableMapOf<Int, RgbProfile>()
+    private val mergeUris = mutableListOf<Uri>()
+    private val PICK_MERGE_VIDEOS = 7304
+    private val PICK_REFERENCE_IMAGE = 7305
+    private var referenceImageUri: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,6 +146,8 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.exportSegmentsSeparatelyButton).setOnClickListener { exportTimelineSegmentsSeparately() }
 
         findViewById<Button>(R.id.openButton).setOnClickListener { chooseVideo() }
+        findViewById<Button>(R.id.mergeButton).setOnClickListener { if (mergeUris.isEmpty()) chooseVideosForMerge() else mergeSelectedVideos() }
+        findViewById<Button>(R.id.imageSceneSearchButton).setOnClickListener { chooseReferenceImage() }
         findViewById<Button>(R.id.selectAllButton).setOnClickListener {
             if (selectedUri == null || videoDurationMs <= 0L) {
                 Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_SHORT).show()
@@ -188,23 +196,231 @@ class MainActivity : Activity() {
         handleIncomingVideoIntent(intent)
     }
 
-    /** Accepts a video shared from another app through Android's Sharesheet. */
+    /** Accepts one shared video for editing or multiple shared videos for Merge. */
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingVideoIntent(intent)
+    }
+
     private fun handleIncomingVideoIntent(incoming: Intent?) {
         if (incoming == null) return
         val action = incoming.action
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
-        val sharedUri: Uri? = if (android.os.Build.VERSION.SDK_INT >= 33) {
-            incoming.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        } else {
+        val uris = mutableListOf<Uri>()
+        if (action == Intent.ACTION_SEND_MULTIPLE) {
             @Suppress("DEPRECATION")
-            (incoming.getParcelableExtra<android.os.Parcelable>(Intent.EXTRA_STREAM) as? Uri)
+            val streams = incoming.getParcelableArrayListExtra<android.os.Parcelable>(Intent.EXTRA_STREAM)
+            streams?.forEach { (it as? Uri)?.let(uris::add) }
+        } else {
+            val uri = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                incoming.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                incoming.getParcelableExtra<android.os.Parcelable>(Intent.EXTRA_STREAM) as? Uri
+            }
+            uri?.let(uris::add)
         }
-        val uri = sharedUri ?: incoming.clipData?.getItemAt(0)?.uri
-        if (uri == null) {
+        incoming.clipData?.let { clip ->
+            for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let { if (it !in uris) uris.add(it) }
+        }
+        if (uris.isEmpty()) {
             Toast.makeText(this, "ویدیوی اشتراک‌گذاری‌شده قابل دریافت نیست", Toast.LENGTH_LONG).show()
             return
         }
-        loadSelectedVideo(uri, false)
+        if (uris.size > 1) {
+            mergeUris.clear(); mergeUris.addAll(uris.distinct())
+            findViewById<Button>(R.id.mergeButton).text = "Merge (${mergeUris.size})"
+            statusText.text = "${mergeUris.size} ویدیو دریافت شد؛ برای ادغام، دکمهٔ Merge را بزنید"
+            Toast.makeText(this, "ویدیوها به بخش Merge منتقل شدند", Toast.LENGTH_SHORT).show()
+        } else {
+            mergeUris.clear()
+            loadSelectedVideo(uris.first(), false)
+        }
+    }
+
+    private fun chooseVideosForMerge() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, PICK_MERGE_VIDEOS)
+    }
+
+    @Deprecated("Uses Activity result callback for compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK || data == null) return
+        if (requestCode == PICK_MERGE_VIDEOS) {
+            val picked = mutableListOf<Uri>()
+            data.clipData?.let { clip -> for (i in 0 until clip.itemCount) picked.add(clip.getItemAt(i).uri) }
+            data.data?.let { if (it !in picked) picked.add(it) }
+            mergeUris.clear(); mergeUris.addAll(picked.distinct())
+            if (mergeUris.size < 2) {
+                mergeUris.clear()
+                Toast.makeText(this, "برای Merge حداقل دو ویدیو انتخاب کنید", Toast.LENGTH_LONG).show()
+                return
+            }
+            findViewById<Button>(R.id.mergeButton).text = "Merge (${mergeUris.size})"
+            statusText.text = "${mergeUris.size} ویدیو برای ادغام آماده است؛ دکمهٔ Merge را دوباره بزنید"
+        } else if (requestCode == REQUEST_VIDEO) {
+            val uri = data.data ?: return
+            loadSelectedVideo(uri, true)
+        } else if (requestCode == PICK_REFERENCE_IMAGE) {
+            referenceImageUri = data.data ?: return
+            if (selectedUri == null || videoDurationMs <= 0L) {
+                Toast.makeText(this, "حالا ویدیوی موردنظر را انتخاب کنید؛ سپس دوباره جست‌وجو با عکس را بزنید", Toast.LENGTH_LONG).show()
+                return
+            }
+            searchVideoForImage(referenceImageUri!!, selectedUri!!)
+        }
+    }
+
+    private fun chooseReferenceImage() {
+        if (selectedUri == null || videoDurationMs <= 0L) {
+            Toast.makeText(this, "ابتدا ویدیویی انتخاب کنید", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        try { startActivityForResult(intent, PICK_REFERENCE_IMAGE) }
+        catch (_: Exception) { Toast.makeText(this, "انتخاب‌گر عکس در دسترس نیست", Toast.LENGTH_LONG).show() }
+    }
+
+    private data class ImageMatch(val timeMs: Long, val score: Double, val bitmap: Bitmap)
+
+    private fun searchVideoForImage(imageUri: Uri, videoUri: Uri) {
+        statusText.text = "در حال جست‌وجوی صحنه‌های مشابه عکس…"
+        findViewById<Button>(R.id.imageSceneSearchButton).isEnabled = false
+        worker.execute {
+            var retriever: MediaMetadataRetriever? = null
+            try {
+                val ref = contentResolver.openInputStream(imageUri)?.use { BitmapFactoryCompat.decode(it) }
+                    ?: throw IllegalStateException("خواندن عکس ناموفق بود")
+                val refSmall = Bitmap.createScaledBitmap(ref, 32, 32, true)
+                ref.recycle()
+                retriever = MediaMetadataRetriever().apply { setDataSource(this@MainActivity, videoUri) }
+                val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                if (duration <= 0L) throw IllegalStateException("مدت ویدیو خوانده نشد")
+                val matches = mutableListOf<ImageMatch>()
+                var t = 0L
+                while (t < duration) {
+                    val frame = retriever.getFrameAtTime(t * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    if (frame != null) {
+                        val small = Bitmap.createScaledBitmap(frame, 32, 32, true)
+                        val score = imageSimilarity(refSmall, small)
+                        if (score >= 0.72) matches.add(ImageMatch(t, score, Bitmap.createScaledBitmap(frame, 240, 135, true)))
+                        small.recycle(); frame.recycle()
+                    }
+                    t += 1000L
+                }
+                refSmall.recycle()
+                val filtered = matches.sortedByDescending { it.score }.fold(mutableListOf<ImageMatch>()) { acc, item ->
+                    if (acc.none { kotlin.math.abs(it.timeMs - item.timeMs) < 2500L }) acc.add(item)
+                    acc
+                }.sortedBy { it.timeMs }.take(60)
+                mainHandler.post {
+                    findViewById<Button>(R.id.imageSceneSearchButton).isEnabled = true
+                    statusText.text = "جست‌وجو تمام شد؛ ${filtered.size} صحنهٔ مشابه پیدا شد"
+                    showImageMatches(filtered)
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    findViewById<Button>(R.id.imageSceneSearchButton).isEnabled = true
+                    statusText.text = "جست‌وجوی عکس ناموفق بود: ${e.message ?: "خطا"}"
+                    Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+                }
+            } finally { try { retriever?.release() } catch (_: Exception) { } }
+        }
+    }
+
+    private fun imageSimilarity(a: Bitmap, b: Bitmap): Double {
+        val pa = IntArray(32 * 32); val pb = IntArray(32 * 32)
+        a.getPixels(pa, 0, 32, 0, 0, 32, 32); b.getPixels(pb, 0, 32, 0, 0, 32, 32)
+        var diff = 0.0
+        for (i in pa.indices) {
+            val ca = pa[i]; val cb = pb[i]
+            diff += (kotlin.math.abs(Color.red(ca)-Color.red(cb)) + kotlin.math.abs(Color.green(ca)-Color.green(cb)) + kotlin.math.abs(Color.blue(ca)-Color.blue(cb))) / 765.0
+        }
+        return 1.0 - diff / pa.size
+    }
+
+    private fun showImageMatches(matches: List<ImageMatch>) {
+        if (matches.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("نتیجهٔ جست‌وجو")
+                .setMessage("صحنهٔ مشابهی با آستانهٔ فعلی پیدا نشد. عکس واضح‌تر یا فریم نزدیک‌تر را امتحان کنید.")
+                .setPositiveButton("باشه", null).show()
+            return
+        }
+        val scroll = ScrollView(this)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        matches.forEach { match ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
+            val image = ImageView(this).apply { setImageBitmap(match.bitmap); layoutParams = LinearLayout.LayoutParams(dp(140), dp(80)); scaleType = ImageView.ScaleType.CENTER_CROP }
+            val label = TextView(this).apply { text = "${formatTime(match.timeMs)}  •  شباهت ${(match.score * 100).toInt()}٪
+برای رفتن به این صحنه لمس کنید"; setTextColor(Color.WHITE); textSize = 13f; setPadding(dp(8), 0, 0, 0) }
+            row.addView(image); row.addView(label); row.setOnClickListener { videoView.seekTo(match.timeMs.toInt()); videoView.start() }
+            list.addView(row)
+        }
+        scroll.addView(list)
+        AlertDialog.Builder(this).setTitle("اسلایدشو: ${matches.size} صحنهٔ مشابه")
+            .setView(scroll).setPositiveButton("بستن", null).show()
+    }
+
+    private object BitmapFactoryCompat {
+        fun decode(input: java.io.InputStream): Bitmap? = android.graphics.BitmapFactory.decodeStream(input)
+    }
+
+    private fun mergeSelectedVideos() {
+        val sources = mergeUris.toList()
+        if (sources.size < 2) { chooseVideosForMerge(); return }
+        val button = findViewById<Button>(R.id.mergeButton)
+        button.isEnabled = false
+        statusText.text = "در حال ادغام ${sources.size} ویدیو…"
+        val output = File(cacheDir, "evc_merge_${System.currentTimeMillis()}.mp4")
+        try {
+            val items = sources.map { uri -> EditedMediaItem.Builder(MediaItem.fromUri(uri)).build() }
+            val sequence = EditedMediaItemSequence.Builder(items).build()
+            val composition = Composition.Builder(sequence).build()
+            val transformer = Transformer.Builder(this).addListener(object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    activeTransformer = null
+                    try {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_Merged_${System.currentTimeMillis()}.mp4")
+                            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
+                                put(MediaStore.Video.Media.IS_PENDING, 1)
+                            }
+                        }
+                        val outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                            ?: throw IllegalStateException("ساخت فایل در Movies/EVC ممکن نشد")
+                        contentResolver.openOutputStream(outUri)?.use { out -> FileInputStream(output).use { it.copyTo(out) } }
+                            ?: throw IllegalStateException("نوشتن فایل ادغام‌شده ناموفق بود")
+                        if (android.os.Build.VERSION.SDK_INT >= 29) contentResolver.update(outUri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                        output.delete(); mergeUris.clear(); button.text = "Merge"; button.isEnabled = true
+                        statusText.text = "ویدیوها در Movies/EVC ادغام شدند"
+                        Toast.makeText(this@MainActivity, "فایل ادغام‌شده ذخیره شد", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) { output.delete(); button.isEnabled = true; statusText.text = "ذخیرهٔ Merge ناموفق بود: ${e.message}" }
+                }
+                override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                    activeTransformer = null; output.delete(); button.isEnabled = true
+                    statusText.text = "ادغام ناموفق بود: ${exportException.message ?: "خطای پردازش ویدیو"}"
+                    Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
+                }
+            }).build()
+            activeTransformer = transformer
+            transformer.start(composition, output.absolutePath)
+        } catch (e: Exception) {
+            activeTransformer = null; output.delete(); button.isEnabled = true
+            statusText.text = "شروع Merge ناموفق بود: ${e.message ?: "خطا"}"
+        }
     }
 
     private fun loadSelectedVideo(uri: Uri, persistPermission: Boolean) {
@@ -487,14 +703,6 @@ class MainActivity : Activity() {
         }
         try { startActivityForResult(intent, REQUEST_VIDEO) }
         catch (_: Exception) { Toast.makeText(this, "انتخاب‌گر فایل در دسترس نیست", Toast.LENGTH_LONG).show() }
-    }
-
-    @Deprecated("Uses the compatible document picker result API for broad Android support")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_VIDEO || resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        loadSelectedVideo(uri, true)
     }
 
     private fun buildEmptyStoryboard() {

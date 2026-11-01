@@ -13,6 +13,9 @@
 
 
     
+    <Button android:id="@+id/mergeButton" android:layout_width="match_parent" android:layout_height="30dp" android:layout_marginTop="1dp" android:layout_marginBottom="1dp" android:minHeight="0dp" android:text="Merge • انتخاب چند ویدیو" android:textSize="11sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#70AEFF" android:paddingLeft="4dp" android:paddingRight="4dp" />
+    <Button android:id="@+id/imageSceneSearchButton" android:layout_width="match_parent" android:layout_height="30dp" android:layout_marginTop="1dp" android:layout_marginBottom="1dp" android:minHeight="0dp" android:text="جست‌وجوی صحنه با عکس و نمایش اسلایدشو" android:textSize="11sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#D7A6FF" android:paddingLeft="4dp" android:paddingRight="4dp" />
+
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="1dp" android:paddingBottom="1dp">
         <Button android:id="@+id/colorizePreviewButton" android:layout_width="0dp" android:layout_height="33dp" android:layout_weight="1" android:layout_marginEnd="3dp" android:minHeight="0dp" android:paddingLeft="5dp" android:paddingRight="5dp" android:text="خروجی رنگی" android:textSize="11sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#D7A6FF" />
         <Button android:id="@+id/exportButton" android:layout_width="0dp" android:layout_height="33dp" android:layout_weight="1" android:layout_marginEnd="3dp" android:minHeight="0dp" android:paddingLeft="5dp" android:paddingRight="5dp" android:text="بدون تغییر کدک" android:textSize="11sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#43D9A3" />
