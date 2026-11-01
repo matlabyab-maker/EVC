@@ -1424,7 +1424,10 @@ class MainActivity : Activity() {
                 val segmentStartUs = if (startProbe.sampleTrackIndex == videoTrack) startProbe.sampleTime else actualStartUs
                 startProbe.release()
 
-                probe.seekTo(actualStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                // Start this output strictly at the selected slide's own sync frame.
+                // Seeking to PREVIOUS_SYNC can land inside the preceding storyboard
+                // interval; use NEXT_SYNC and still enforce the selected start timestamp.
+                probe.seekTo(actualStartUs, MediaExtractor.SEEK_TO_NEXT_SYNC)
                 while (probe.sampleTrackIndex >= 0) {
                     val track = probe.sampleTrackIndex
                     val pts = probe.sampleTime

@@ -158,3 +158,7 @@ Selected storyboard export now creates one MP4 file per selected storyboard cell
 
 ## Version 0.2.50
 - Timeline now follows playback: the playhead moves across the visible timeline, and the timeline window scrolls when playback approaches the right edge. Seeking back also brings the playhead back into view.
+
+
+## v0.2.51
+- Storyboard slide exports now seek forward to the selected interval’s own sync frame to avoid including samples from the preceding slide.
