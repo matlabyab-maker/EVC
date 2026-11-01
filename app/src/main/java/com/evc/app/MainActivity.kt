@@ -813,26 +813,18 @@ class MainActivity : Activity() {
                     val rangeStart = storyboardStartMs.coerceIn(0L, duration)
                     val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else duration).coerceIn(rangeStart, duration)
                     val timestampMs = if (count <= 1) rangeStart else rangeStart + (rangeEnd - rangeStart) * index / count
-                    // Decode at thumbnail resolution where Android supports it; fall back to a
-                    // normal frame decode on older Android versions. Only one cheap sync fallback.
-                    var bitmap: Bitmap? = try {
+                    // Fast path: sync-frame seeking avoids decoding forward/backward to the
+                    // exact requested timestamp for every one of the 120 storyboard cells.
+                    // Thumbnails are deliberately small; the player still shows the original.
+                    val bitmap: Bitmap? = try {
                         if (android.os.Build.VERSION.SDK_INT >= 27) {
-                            retriever.getScaledFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST, 160, 100)
+                            retriever.getScaledFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 128, 80)
                         } else {
-                            retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+                            retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                         }
                     } catch (_: Exception) { null }
-                    if (bitmap == null) {
-                        bitmap = try {
-                            if (android.os.Build.VERSION.SDK_INT >= 27) {
-                                retriever.getScaledFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 160, 100)
-                            } else {
-                                retriever.getFrameAtTime(timestampMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                            }
-                        } catch (_: Exception) { null }
-                    }
                     if (bitmap != null) {
-                        val scaled = scaleBitmapPreservingAspect(bitmap, 160, 100)
+                        val scaled = scaleBitmapPreservingAspect(bitmap, 128, 80)
                         mainHandler.post {
                             if (generation == storyboardGeneration) {
                                 frameBitmaps[index] = scaled
@@ -872,12 +864,12 @@ class MainActivity : Activity() {
                     val time = if (sampleCount <= 1) 0L else durationMs * i / sampleCount
                     val bitmap = try {
                         if (android.os.Build.VERSION.SDK_INT >= 27) {
-                            retriever.getScaledFrameAtTime(time * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 135)
+                            retriever.getScaledFrameAtTime(time * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 160, 90)
                         } else {
                             retriever.getFrameAtTime(time * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                         }
                     } catch (_: Exception) { null }
-                    if (bitmap != null) frames.add(time to scaleBitmapPreservingAspect(bitmap, 240, 135))
+                    if (bitmap != null) frames.add(time to scaleBitmapPreservingAspect(bitmap, 160, 90))
                 }
                 mainHandler.post {
                     if (generation == storyboardGeneration) {
@@ -1375,6 +1367,22 @@ class MainActivity : Activity() {
         val videoTrack = (0 until probe.trackCount).firstOrNull {
             probe.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
         } ?: run { probe.release(); throw IllegalStateException("ترک ویدیویی پیدا نشد") }
+        // Android's MPEG-4 MediaMuxer only supports a subset of MP4 tracks. Never silently
+        // discard subtitles, timed metadata, or other non-A/V tracks during a modified export.
+        val unsupportedTracks = mutableListOf<String>()
+        for (i in 0 until probe.trackCount) {
+            val format = probe.getTrackFormat(i)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: "unknown/unknown"
+            if (!mime.startsWith("video/") && !mime.startsWith("audio/")) unsupportedTracks.add("#$i $mime")
+        }
+        if (unsupportedTracks.isNotEmpty()) {
+            probe.release()
+            throw IllegalStateException(
+                "این ویدیو ترک‌های غیرصوتی/تصویری دارد (${unsupportedTracks.joinToString()})؛ " +
+                "خروجی‌گیر فعلی اندروید قادر به حفظ مطمئن زیرنویس/داده‌های آن نیست. برای جلوگیری از حذف بی‌صدا، خروجی لغو شد. " +
+                "برای حفظ همهٔ ترک‌ها باید خروجی‌گیر FFmpeg با پشتیبانی از کپی همهٔ ترک‌ها اضافه شود."
+            )
+        }
         val output = File(cacheDir, "evc_export_${System.currentTimeMillis()}.mp4")
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         val trackMap = mutableMapOf<Int, Int>()
@@ -1382,8 +1390,14 @@ class MainActivity : Activity() {
             val format = probe.getTrackFormat(i)
             val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
             if (mime.startsWith("video/") || mime.startsWith("audio/")) {
-                trackMap[i] = muxer.addTrack(format)
-                probe.selectTrack(i)
+                try {
+                    trackMap[i] = muxer.addTrack(format)
+                    probe.selectTrack(i)
+                } catch (e: Exception) {
+                    try { muxer.release() } catch (_: Exception) { }
+                    probe.release()
+                    throw IllegalStateException("حفظ ترک $i با کدک $mime توسط خروجی‌گیر MP4 اندروید پشتیبانی نشد؛ برای جلوگیری از حذف ترک، خروجی لغو شد.", e)
+                }
             }
         }
         if (trackMap.isEmpty()) { probe.release(); muxer.release(); throw IllegalStateException("ترک قابل خروجی پیدا نشد") }
