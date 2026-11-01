@@ -149,3 +149,12 @@ This version does not cut video yet. The only app capability is selecting and pl
 ## Version 0.2.40 — Separate selected storyboard exports
 
 Selected storyboard export now creates one MP4 file per selected storyboard cell. It no longer concatenates multiple selected cells into one continuous output. Files are saved under `Movies/EVC`. In stream-copy mode, exact boundaries remain limited by source keyframes; a selected interval without a usable keyframe may fail rather than be re-encoded.
+
+
+## Version 0.2.49 — Double-height timeline and track safety
+- Timeline strip height doubled from 68dp to 136dp.
+- Modified range exports continue to stream-copy all audio/video tracks supported by Android MP4 MediaMuxer; if subtitle or other unsupported tracks are detected, export is cancelled rather than silently dropping them. Full subtitle/metadata preservation requires an FFmpeg-based muxing path and is not yet claimed in this version.
+
+
+## Version 0.2.50
+- Timeline now follows playback: the playhead moves across the visible timeline, and the timeline window scrolls when playback approaches the right edge. Seeking back also brings the playhead back into view.

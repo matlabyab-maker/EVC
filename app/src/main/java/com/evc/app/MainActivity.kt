@@ -1536,7 +1536,24 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
         thumbnails = next
         invalidate()
     }
-    fun setPlayhead(timeMs: Long) { playheadMs = timeMs.coerceIn(0L, durationMs); invalidate() }
+    fun setPlayhead(timeMs: Long) {
+        playheadMs = timeMs.coerceIn(0L, durationMs)
+        // Auto-follow playback: let the playhead travel across the visible strip,
+        // then move the timeline window when it approaches the right edge.
+        if (durationMs > 0L) {
+            val visible = visibleDuration()
+            val end = windowStartMs + visible
+            val followThreshold = windowStartMs + (visible * 0.82f).toLong()
+            if (playheadMs > followThreshold && playheadMs < durationMs) {
+                windowStartMs = (playheadMs - (visible * 0.72f).toLong())
+                    .coerceIn(0L, max(0L, durationMs - visible))
+            } else if (playheadMs < windowStartMs && playheadMs > 0L) {
+                windowStartMs = (playheadMs - (visible * 0.15f).toLong())
+                    .coerceIn(0L, max(0L, durationMs - visible))
+            }
+        }
+        invalidate()
+    }
     private fun visibleDuration(): Long = if (durationMs <= 0L) 1L else (durationMs / zoom).toLong().coerceAtLeast(1L)
     private fun timeAt(x: Float): Long {
         val usable = (width - 16f * density).coerceAtLeast(1f)
