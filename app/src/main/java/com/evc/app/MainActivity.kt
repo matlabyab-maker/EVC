@@ -1312,7 +1312,10 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Exports each selected storyboard cell to its own MP4 file; never concatenates them. */
+    /** Exports ONLY the selected storyboard time intervals, concatenated in selection order.
+     *  The intervals are built from the storyboard's active start/end range, not the full video.
+     *  No complement/remaining-video ranges are ever added to this export.
+     */
     private fun exportSelectedStoryboardFramesSeparately() {
         val source = selectedUri
         if (source == null || videoDurationMs <= 0L) {
@@ -1320,71 +1323,81 @@ class MainActivity : Activity() {
             return
         }
         val total = ROWS * FRAMES_PER_ROW
-        // Freeze the exact selection at click time. Never fall back to exporting the full video.
-        val chosen = selectedFrames.toSet().filter { it in 0 until total && it !in deletedStoryboardFrames }.sorted()
+        val chosen = selectedFrames.toSet()
+            .filter { it in 0 until total && it !in deletedStoryboardFrames }
+            .sorted()
         if (chosen.isEmpty()) {
             statusText.text = "خروجی انجام نشد: هیچ اسلایدی برای خروجی انتخاب نشده است"
             Toast.makeText(this, "خروجی لغو شد؛ ابتدا اسلایدهای موردنظر را انتخاب کنید", Toast.LENGTH_LONG).show()
             return
         }
-        statusText.text = "فقط ${chosen.size} اسلاید انتخاب شده برای خروجی آماده می‌شود؛ اسلایدهای انتخاب‌نشده صادر نمی‌شوند"
+
         val rangeStart = storyboardStartMs.coerceIn(0L, videoDurationMs)
-        val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else videoDurationMs).coerceIn(rangeStart, videoDurationMs)
+        val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else videoDurationMs)
+            .coerceIn(rangeStart, videoDurationMs)
         if (rangeEnd <= rangeStart) {
             Toast.makeText(this, "بازهٔ زمانی استوری‌بورد معتبر نیست", Toast.LENGTH_LONG).show()
             return
         }
-        val ranges = chosen.mapNotNull { index ->
-            val start = rangeStart + (rangeEnd - rangeStart) * index / total
-            val end = rangeStart + (rangeEnd - rangeStart) * (index + 1) / total
-            if (end > start) index to (start to end) else null
+
+        // One exact interval per selected storyboard cell; never calculate the inverse
+        // (unselected/remaining intervals) and never fall back to full-video export.
+        val selectedRanges = chosen.mapNotNull { index ->
+            val a = rangeStart + (rangeEnd - rangeStart) * index / total
+            val b = rangeStart + (rangeEnd - rangeStart) * (index + 1) / total
+            if (b > a) a to b else null
         }
+        if (selectedRanges.isEmpty()) {
+            Toast.makeText(this, "بازهٔ زمانی معتبری در اسلایدهای انتخاب‌شده وجود ندارد", Toast.LENGTH_LONG).show()
+            return
+        }
+
         val button = findViewById<Button>(R.id.exportButton)
         button.isEnabled = false
-        statusText.text = "در حال ذخیرهٔ ${ranges.size} اسلاید به‌صورت فایل‌های مستقل؛ بدون ادغام…"
+        statusText.text = "در حال ساخت یک فایل فقط از ${selectedRanges.size} بازهٔ انتخاب‌شده؛ بازه‌های انتخاب‌نشده اضافه نمی‌شوند…"
         worker.execute {
-            var saved = 0
-            val errors = mutableListOf<String>()
-            ranges.forEachIndexed { ordinal, item ->
-                val (frameIndex, range) = item
-                var temp: File? = null
-                var outUri: Uri? = null
-                try {
-                    temp = muxRemainingRanges(source, listOf(range))
-                    val values = ContentValues().apply {
-                        put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_slide_${(frameIndex + 1).toString().padStart(3, '0')}_${System.currentTimeMillis()}.mp4")
-                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                        if (android.os.Build.VERSION.SDK_INT >= 29) {
-                            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
-                            put(MediaStore.Video.Media.IS_PENDING, 1)
-                        }
-                    }
-                    outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-                        ?: throw IllegalStateException("ساخت فایل اسلاید ${frameIndex + 1} ناموفق بود")
-                    contentResolver.openOutputStream(outUri)?.use { output -> FileInputStream(temp).use { input -> input.copyTo(output) } }
-                        ?: throw IllegalStateException("نوشتن فایل اسلاید ${frameIndex + 1} ناموفق بود")
+            var temp: File? = null
+            var outUri: Uri? = null
+            var error: String? = null
+            try {
+                temp = muxRemainingRanges(source, selectedRanges)
+                val values = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_selected_storyboard_${System.currentTimeMillis()}.mp4")
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                     if (android.os.Build.VERSION.SDK_INT >= 29) {
-                        val done = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
-                        contentResolver.update(outUri, done, null, null)
+                        put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
+                        put(MediaStore.Video.Media.IS_PENDING, 1)
                     }
-                    writeOutputInfoReport(outUri!!)
-                    saved++
-                } catch (e: Exception) {
-                    outUri?.let { try { contentResolver.delete(it, null, null) } catch (_: Exception) { } }
-                    errors.add("اسلاید ${frameIndex + 1}: ${e.message ?: e.javaClass.simpleName}")
-                } finally {
-                    temp?.delete()
                 }
+                outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("ساخت فایل خروجی ناموفق بود")
+                contentResolver.openOutputStream(outUri)?.use { output ->
+                    FileInputStream(temp).use { input -> input.copyTo(output) }
+                } ?: throw IllegalStateException("نوشتن فایل خروجی ناموفق بود")
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    contentResolver.update(outUri, ContentValues().apply {
+                        put(MediaStore.Video.Media.IS_PENDING, 0)
+                    }, null, null)
+                }
+                writeOutputInfoReport(outUri!!)
+            } catch (e: Exception) {
+                error = e.message ?: e.javaClass.simpleName
+                outUri?.let { try { contentResolver.delete(it, null, null) } catch (_: Exception) { } }
+            } finally {
+                temp?.delete()
             }
             mainHandler.post {
                 button.isEnabled = true
-                statusText.text = if (errors.isEmpty()) "$saved اسلاید در $saved فایل مستقل در Movies/EVC ذخیره شد؛ اسلایدها به هم چسبانده نشدند" else "$saved فایل مستقل ذخیره شد؛ ${errors.size} مورد ناموفق: ${errors.first()}"
+                if (error == null && outUri != null) {
+                    statusText.text = "فقط ${selectedRanges.size} بازهٔ انتخاب‌شده در یک فایل ذخیره شد؛ بازه‌های انتخاب‌نشده وارد خروجی نشدند"
+                } else {
+                    statusText.text = "خروجی اسلایدهای انتخاب‌شده ناموفق بود: ${error ?: "خطای ناشناخته"}"
+                }
                 Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    /** Stream-copies kept time ranges without retaining every sample in RAM. */
     private fun muxRemainingRanges(source: Uri, ranges: List<Pair<Long, Long>>): File {
         val probe = MediaExtractor()
         probe.setDataSource(this, source, null)
