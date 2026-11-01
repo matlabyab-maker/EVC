@@ -376,7 +376,7 @@ class MainActivity : Activity() {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
         matches.forEach { match ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
-            val image = ImageView(this).apply { setImageBitmap(match.bitmap); layoutParams = LinearLayout.LayoutParams(dp(140), dp(80)); scaleType = ImageView.ScaleType.CENTER_CROP }
+            val image = ImageView(this).apply { setImageBitmap(match.bitmap); layoutParams = LinearLayout.LayoutParams(dp(142), dp(82)); scaleType = ImageView.ScaleType.FIT_CENTER }
             val label = TextView(this).apply { text = "${formatTime(match.timeMs)}  •  شباهت ${(match.score * 100).toInt()}٪\nبرای رفتن به این صحنه لمس کنید"; setTextColor(Color.WHITE); textSize = 13f; setPadding(dp(8), 0, 0, 0) }
             row.addView(image); row.addView(label); row.setOnClickListener { videoView.seekTo(match.timeMs.toInt()); videoView.start() }
             list.addView(row)
@@ -757,11 +757,14 @@ class MainActivity : Activity() {
             if (bitmap == null) setColorFilter(Color.rgb(116, 150, 198))
             contentDescription = "فریم ${index + 1}"
         }
-        cell.addView(image, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val labelHeight = dp(14)
+        cell.addView(image, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+            bottomMargin = labelHeight
+        })
         val timeLabel = TextView(this).apply {
             text = label; textSize = 9f; setTextColor(Color.WHITE)
             setPadding(dp(3), 0, dp(3), 0); gravity = Gravity.CENTER
-            setBackgroundColor(0xAA07142F.toInt())
+            setBackgroundColor(0xEE07142F.toInt())
         }
         cell.addView(timeLabel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(16), Gravity.BOTTOM))
         val badge = TextView(this).apply {
@@ -1626,22 +1629,19 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
                 val dst = RectF(max(left, prevX), top, minOf(right, nextX), bottom)
                 if (dst.width() > 0f && dst.height() > 0f) {
                     val bitmap = frame.second
+                    // Fit the complete frame into its time cell: never crop away image content.
                     val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
                     val targetRatio = dst.width() / dst.height()
-                    // Fill each timeline cell so the thumbnails use the available height;
-                    // center-crop is only for the preview thumbnails, never the source video.
-                    val src = if (bitmapRatio > targetRatio) {
-                        val cropWidth = (bitmap.height * targetRatio).toInt().coerceIn(1, bitmap.width)
-                        val cropLeft = (bitmap.width - cropWidth) / 2
-                        Rect(cropLeft, 0, cropLeft + cropWidth, bitmap.height)
+                    val fit = if (bitmapRatio > targetRatio) {
+                        val fittedHeight = dst.width() / bitmapRatio
+                        RectF(dst.left, dst.centerY() - fittedHeight / 2f, dst.right, dst.centerY() + fittedHeight / 2f)
                     } else {
-                        val cropHeight = (bitmap.width / targetRatio).toInt().coerceIn(1, bitmap.height)
-                        val cropTop = (bitmap.height - cropHeight) / 2
-                        Rect(0, cropTop, bitmap.width, cropTop + cropHeight)
+                        val fittedWidth = dst.height() * bitmapRatio
+                        RectF(dst.centerX() - fittedWidth / 2f, dst.top, dst.centerX() + fittedWidth / 2f, dst.bottom)
                     }
                     paint.color = Color.WHITE
                     canvas.drawRect(dst, backgroundPaint)
-                    canvas.drawBitmap(bitmap, src, dst, paint)
+                    canvas.drawBitmap(bitmap, null, fit, paint)
                 }
             }
             canvas.restoreToCount(save)
@@ -1661,7 +1661,7 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
         paint.color = Color.WHITE; paint.textSize = 9f * density
         canvas.drawText(format(playheadMs), left, 10f * density + 2f, paint)
         paint.color = Color.rgb(67, 217, 163); paint.strokeWidth = 3f * density
-        val px = xAt(playheadMs); canvas.drawLine(px, 3f * density, px, height.toFloat(), paint)
+        val px = xAt(playheadMs); canvas.drawLine(px, top, px, bottom, paint)
         paint.color = Color.LTGRAY; paint.textSize = 8f * density
         canvas.drawText(format(start), left, height - 3f * density, paint)
         val endText = format(end); canvas.drawText(endText, right - paint.measureText(endText), height - 3f * density, paint)
