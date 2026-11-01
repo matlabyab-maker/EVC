@@ -166,7 +166,15 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.deleteSelectedButton).setOnClickListener { deleteSelectedStoryboardFrames() }
         selectForDeleteModeButton.setOnClickListener { setStoryboardSelectionMode(false) }
         selectForExportModeButton.setOnClickListener { setStoryboardSelectionMode(true) }
-        findViewById<Button>(R.id.exportButton).setOnClickListener { exportRemainingVideo(selectingForExport) }
+        findViewById<Button>(R.id.exportButton).setOnClickListener {
+            // Explicit storyboard selection always wins over the general whole-video export.
+            // This prevents a stale/incorrect mode flag from exporting selected + unselected slides.
+            when {
+                selectingForExport -> exportSelectedStoryboardFramesSeparately()
+                selectedFrames.isNotEmpty() -> exportSelectedStoryboardFramesSeparately()
+                else -> exportRemainingVideo(false)
+            }
+        }
         findViewById<Button>(R.id.applyColorToSelectedButton).setOnClickListener { applyColorToSelectedFrames() }
         findViewById<Button>(R.id.colorizePreviewButton).setOnClickListener { exportColorizedVideo() }
         setupManualColorControls()
@@ -1305,11 +1313,14 @@ class MainActivity : Activity() {
             return
         }
         val total = ROWS * FRAMES_PER_ROW
+        // Freeze the exact selection at click time. Never fall back to exporting the full video.
         val chosen = selectedFrames.toSet().filter { it in 0 until total && it !in deletedStoryboardFrames }.sorted()
         if (chosen.isEmpty()) {
-            Toast.makeText(this, "ابتدا اسلایدهای موردنظر برای خروجی جداگانه را انتخاب کنید", Toast.LENGTH_LONG).show()
+            statusText.text = "خروجی انجام نشد: هیچ اسلایدی برای خروجی انتخاب نشده است"
+            Toast.makeText(this, "خروجی لغو شد؛ ابتدا اسلایدهای موردنظر را انتخاب کنید", Toast.LENGTH_LONG).show()
             return
         }
+        statusText.text = "فقط ${chosen.size} اسلاید انتخاب شده برای خروجی آماده می‌شود؛ اسلایدهای انتخاب‌نشده صادر نمی‌شوند"
         val rangeStart = storyboardStartMs.coerceIn(0L, videoDurationMs)
         val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else videoDurationMs).coerceIn(rangeStart, videoDurationMs)
         if (rangeEnd <= rangeStart) {
@@ -1575,7 +1586,7 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val left = 8f * density; val right = width - left
-        val top = height * .12f; val bottom = height * .88f
+        val top = height * .03f; val bottom = height * .97f
         paint.color = Color.rgb(37, 69, 111); canvas.drawRoundRect(left, top, right, bottom, 5f * density, 5f * density, paint)
         if (durationMs <= 0L) {
             paint.color = Color.LTGRAY; paint.textSize = 11f * density
@@ -1597,21 +1608,24 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
                     val bitmap = frame.second
                     val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
                     val targetRatio = dst.width() / dst.height()
-                    // Fit the whole frame inside its time cell; never stretch or crop the source image.
-                    val fitted = if (bitmapRatio > targetRatio) {
-                        val fittedHeight = dst.width() / bitmapRatio
-                        RectF(dst.left, dst.centerY() - fittedHeight / 2f, dst.right, dst.centerY() + fittedHeight / 2f)
+                    // Fill each timeline cell so the thumbnails use the available height;
+                    // center-crop is only for the preview thumbnails, never the source video.
+                    val src = if (bitmapRatio > targetRatio) {
+                        val cropWidth = (bitmap.height * targetRatio).toInt().coerceIn(1, bitmap.width)
+                        val cropLeft = (bitmap.width - cropWidth) / 2
+                        Rect(cropLeft, 0, cropLeft + cropWidth, bitmap.height)
                     } else {
-                        val fittedWidth = dst.height() * bitmapRatio
-                        RectF(dst.centerX() - fittedWidth / 2f, dst.top, dst.centerX() + fittedWidth / 2f, dst.bottom)
+                        val cropHeight = (bitmap.width / targetRatio).toInt().coerceIn(1, bitmap.height)
+                        val cropTop = (bitmap.height - cropHeight) / 2
+                        Rect(0, cropTop, bitmap.width, cropTop + cropHeight)
                     }
                     paint.color = Color.WHITE
                     canvas.drawRect(dst, backgroundPaint)
-                    canvas.drawBitmap(bitmap, null, fitted, paint)
+                    canvas.drawBitmap(bitmap, src, dst, paint)
                 }
             }
             canvas.restoreToCount(save)
-            paint.color = Color.argb(70, 8, 17, 32)
+            paint.color = Color.argb(18, 8, 17, 32)
             canvas.drawRoundRect(left, top, right, bottom, 5f * density, 5f * density, paint)
         }
         deletedRanges.forEach { r ->
