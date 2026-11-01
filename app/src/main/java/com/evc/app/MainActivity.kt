@@ -362,8 +362,7 @@ class MainActivity : Activity() {
         matches.forEach { match ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
             val image = ImageView(this).apply { setImageBitmap(match.bitmap); layoutParams = LinearLayout.LayoutParams(dp(140), dp(80)); scaleType = ImageView.ScaleType.CENTER_CROP }
-            val label = TextView(this).apply { text = "${formatTime(match.timeMs)}  •  شباهت ${(match.score * 100).toInt()}٪
-برای رفتن به این صحنه لمس کنید"; setTextColor(Color.WHITE); textSize = 13f; setPadding(dp(8), 0, 0, 0) }
+            val label = TextView(this).apply { text = "${formatTime(match.timeMs)}  •  شباهت ${(match.score * 100).toInt()}٪\nبرای رفتن به این صحنه لمس کنید"; setTextColor(Color.WHITE); textSize = 13f; setPadding(dp(8), 0, 0, 0) }
             row.addView(image); row.addView(label); row.setOnClickListener { videoView.seekTo(match.timeMs.toInt()); videoView.start() }
             list.addView(row)
         }
