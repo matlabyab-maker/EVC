@@ -167,12 +167,19 @@ class MainActivity : Activity() {
         selectForDeleteModeButton.setOnClickListener { setStoryboardSelectionMode(false) }
         selectForExportModeButton.setOnClickListener { setStoryboardSelectionMode(true) }
         findViewById<Button>(R.id.exportButton).setOnClickListener {
-            // Explicit storyboard selection always wins over the general whole-video export.
-            // This prevents a stale/incorrect mode flag from exporting selected + unselected slides.
+            // Fail closed: never interpret an empty storyboard selection as permission to
+            // export the whole video. Full/remaining-video export is allowed only when the
+            // user has actually marked storyboard intervals for deletion; timeline-range
+            // export remains available through its explicit selected range.
             when {
                 selectingForExport -> exportSelectedStoryboardFramesSeparately()
                 selectedFrames.isNotEmpty() -> exportSelectedStoryboardFramesSeparately()
-                else -> exportRemainingVideo(false)
+                selectedTimelineRange != null -> exportRemainingVideo(false)
+                deletedStoryboardFrames.isNotEmpty() -> exportRemainingVideo(false)
+                else -> {
+                    statusText.text = "خروجی انجام نشد؛ ابتدا «انتخاب برای خروجی» را بزنید و اسلایدهای دلخواه را انتخاب کنید، یا یک بازه از نوار زمان انتخاب کنید"
+                    Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+                }
             }
         }
         findViewById<Button>(R.id.applyColorToSelectedButton).setOnClickListener { applyColorToSelectedFrames() }
