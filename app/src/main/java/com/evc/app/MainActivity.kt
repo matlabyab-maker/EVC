@@ -1368,7 +1368,7 @@ class MainActivity : Activity() {
             val b = if (storyboardIntervalMs != null && storyboardIntervalMs!! > 0L) {
                 minOf(rangeEnd, a + storyboardIntervalMs!!)
             } else rangeStart + (rangeEnd - rangeStart) * (index + 1) / total
-            if (a >= rangeEnd || b <= a) continue
+            if (a >= rangeEnd || b <= a) return@mapNotNull null
             if (b > a) a to b else null
         }
         if (selectedRanges.isEmpty()) {
