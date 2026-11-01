@@ -737,7 +737,7 @@ class MainActivity : Activity() {
                 val index = row * FRAMES_PER_ROW + col
                 if (index in deletedStoryboardFrames) continue
                 val cell = makeFrameCell(index, null, "${index + 1}")
-                strip.addView(cell, LinearLayout.LayoutParams(dp(62), dp(40)).apply { setMargins(0, 0, dp(1), 0) })
+                strip.addView(cell, LinearLayout.LayoutParams(dp(64), dp(42)).apply { setMargins(0, 0, dp(1), 0) })
                 frameViews[index] = cell
             }
             horizontal.addView(strip)
@@ -752,21 +752,20 @@ class MainActivity : Activity() {
             setColor(Color.rgb(18, 35, 65)); cornerRadius = dp(2).toFloat()
         }
         val image = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
+            scaleType = ImageView.ScaleType.CENTER_CROP
             if (bitmap != null) setImageBitmap(bitmap) else setImageResource(android.R.drawable.ic_media_play)
             if (bitmap == null) setColorFilter(Color.rgb(116, 150, 198))
             contentDescription = "فریم ${index + 1}"
         }
-        val labelHeight = dp(14)
-        cell.addView(image, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            bottomMargin = labelHeight
-        })
+        cell.addView(image, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val labelHeight = dp(12)
         val timeLabel = TextView(this).apply {
-            text = label; textSize = 9f; setTextColor(Color.WHITE)
-            setPadding(dp(3), 0, dp(3), 0); gravity = Gravity.CENTER
-            setBackgroundColor(0xEE07142F.toInt())
+            text = label; textSize = 8f; setTextColor(Color.WHITE)
+            setPadding(dp(2), 0, dp(2), 0); gravity = Gravity.CENTER
+            // Semi-transparent label: the thumbnail remains visible beneath it.
+            setBackgroundColor(0x6607142F)
         }
-        cell.addView(timeLabel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(16), Gravity.BOTTOM))
+        cell.addView(timeLabel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, labelHeight, Gravity.BOTTOM or Gravity.START))
         val badge = TextView(this).apply {
             text = "✓"; textSize = 15f; setTextColor(Color.BLACK); gravity = Gravity.CENTER
             setBackgroundColor(Color.rgb(255, 210, 31)); visibility = View.GONE
