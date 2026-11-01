@@ -84,6 +84,7 @@ class MainActivity : Activity() {
     private var videoDurationMs = 0L
     private var storyboardStartMs = 0L
     private var storyboardEndMs = 0L
+    private var storyboardIntervalMs: Long? = null
     private var storyboardGeneration = 0
     private data class RgbProfile(val red: Float, val green: Float, val blue: Float)
     private val frameColorProfiles = mutableMapOf<Int, RgbProfile>()
@@ -784,7 +785,7 @@ class MainActivity : Activity() {
             updateSelectionText()
             val rangeStart = storyboardStartMs.coerceIn(0L, videoDurationMs)
             val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else videoDurationMs).coerceIn(rangeStart, videoDurationMs)
-            val timeMs = rangeStart + (rangeEnd - rangeStart) * index / (ROWS * FRAMES_PER_ROW)
+            val timeMs = storyboardTimestampForIndex(index, ROWS * FRAMES_PER_ROW, rangeStart, rangeEnd)
             timelineView.setPlayhead(timeMs)
             try { videoView.seekTo(timeMs.toInt()) } catch (_: Exception) { }
         }
@@ -795,6 +796,14 @@ class MainActivity : Activity() {
         setColor(Color.TRANSPARENT)
         cornerRadius = dp(2).toFloat()
         setStroke(dp(if (selected) 4 else 1), if (selected) Color.rgb(255, 210, 31) else Color.rgb(61, 91, 135))
+    }
+
+    /** Returns the timestamp represented by a storyboard cell. Blank interval keeps the automatic spacing. */
+    private fun storyboardTimestampForIndex(index: Int, count: Int, startMs: Long, endMs: Long): Long {
+        val interval = storyboardIntervalMs
+        return if (interval != null && interval > 0L) {
+            startMs + index.toLong() * interval
+        } else if (count <= 1) startMs else startMs + (endMs - startMs) * index / count
     }
 
     private fun loadStoryboard(uri: Uri) {
@@ -829,7 +838,8 @@ class MainActivity : Activity() {
                     if (index in deletedStoryboardFrames) continue
                     val rangeStart = storyboardStartMs.coerceIn(0L, duration)
                     val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else duration).coerceIn(rangeStart, duration)
-                    val timestampMs = if (count <= 1) rangeStart else rangeStart + (rangeEnd - rangeStart) * index / count
+                    val timestampMs = storyboardTimestampForIndex(index, count, rangeStart, rangeEnd)
+                    if (timestampMs >= rangeEnd) continue
                     // Fast path: sync-frame seeking avoids decoding forward/backward to the
                     // exact requested timestamp for every one of the 120 storyboard cells.
                     // Thumbnails are deliberately small; the player still shows the original.
@@ -954,14 +964,23 @@ class MainActivity : Activity() {
         }
         val start = parseTimeInput(findViewById<android.widget.EditText>(R.id.storyboardStartTime).text.toString())
         val end = parseTimeInput(findViewById<android.widget.EditText>(R.id.storyboardEndTime).text.toString())
+        val intervalField = findViewById<android.widget.EditText>(R.id.storyboardIntervalTime)
+        val intervalText = intervalField.text.toString().trim()
+        val interval = if (intervalText.isEmpty()) null else parseTimeInput(intervalText)
         if (start == null || end == null || start >= end || end > videoDurationMs) {
             findViewById<android.widget.EditText>(R.id.storyboardEndTime).error = "زمان پایان باید بعد از شروع و در محدودهٔ ویدیو باشد"
-            Toast.makeText(this, "زمان را به‌شکل دقیقه:ثانیه وارد کنید؛ مثلاً 01:25", Toast.LENGTH_LONG).show(); return
+            Toast.makeText(this, "زمان شروع و پایان را به‌شکل دقیقه:ثانیه وارد کنید؛ مثلاً 01:25", Toast.LENGTH_LONG).show(); return
         }
+        if (intervalText.isNotEmpty() && (interval == null || interval <= 0L)) {
+            intervalField.error = "مثلاً 10 برای 10 ثانیه یا 01:30 برای یک دقیقه و نیم"
+            Toast.makeText(this, "فاصله را به ثانیه یا دقیقه:ثانیه وارد کنید", Toast.LENGTH_LONG).show(); return
+        }
+        intervalField.error = null
+        storyboardIntervalMs = interval
         storyboardStartMs = start
         storyboardEndMs = end
         reloadStoryboardForRange(uri)
-        statusText.text = "استوری‌بورد بازهٔ ${formatTime(start)} تا ${formatTime(end)} در حال آماده‌سازی است"
+        statusText.text = if (interval == null) "استوری‌بورد بازهٔ ${formatTime(start)} تا ${formatTime(end)} با فاصلهٔ خودکار در حال آماده‌سازی است" else "استوری‌بورد با فاصلهٔ ${formatTime(interval)} بین اسلایدها در حال آماده‌سازی است"
     }
 
     private fun reloadStoryboardForRange(uri: Uri) {
@@ -1345,8 +1364,11 @@ class MainActivity : Activity() {
         // One exact interval per selected storyboard cell; never calculate the inverse
         // (unselected/remaining intervals) and never fall back to full-video export.
         val selectedRanges = chosen.mapNotNull { index ->
-            val a = rangeStart + (rangeEnd - rangeStart) * index / total
-            val b = rangeStart + (rangeEnd - rangeStart) * (index + 1) / total
+            val a = storyboardTimestampForIndex(index, total, rangeStart, rangeEnd)
+            val b = if (storyboardIntervalMs != null && storyboardIntervalMs!! > 0L) {
+                minOf(rangeEnd, a + storyboardIntervalMs!!)
+            } else rangeStart + (rangeEnd - rangeStart) * (index + 1) / total
+            if (a >= rangeEnd || b <= a) continue
             if (b > a) a to b else null
         }
         if (selectedRanges.isEmpty()) {
