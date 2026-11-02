@@ -597,12 +597,27 @@ class MainActivity : Activity() {
         val output = File(cacheDir, "evc_colorized_${System.currentTimeMillis()}.mp4")
         try {
             val total = ROWS * FRAMES_PER_ROW
-            val neutral = RgbProfile(1f, 1f, 1f)
-            val items = (0 until total).mapNotNull { index ->
-                val startMs = videoDurationMs * index / total
-                val endMs = videoDurationMs * (index + 1) / total
-                if (endMs <= startMs) return@mapNotNull null
-                val profile = frameColorProfiles[index] ?: neutral
+            val rangeStart = storyboardStartMs.coerceIn(0L, videoDurationMs)
+            val rangeEnd = (if (storyboardEndMs > rangeStart) storyboardEndMs else videoDurationMs)
+                .coerceIn(rangeStart, videoDurationMs)
+            if (rangeEnd <= rangeStart) throw IllegalStateException("بازهٔ زمانی استوری‌بورد معتبر نیست")
+
+            // Export only intervals for which the user explicitly saved a color profile.
+            // Do not add neutral/unselected storyboard intervals to this output.
+            val coloredIndices = frameColorProfiles.keys
+                .filter { it in 0 until total && it !in deletedStoryboardFrames }
+                .sorted()
+            val intervals = coloredIndices.mapNotNull { index ->
+                val startMs = storyboardTimestampForIndex(index, total, rangeStart, rangeEnd)
+                val endMs = if (storyboardIntervalMs != null && storyboardIntervalMs!! > 0L) {
+                    minOf(rangeEnd, startMs + storyboardIntervalMs!!)
+                } else if (index + 1 < total) {
+                    minOf(rangeEnd, storyboardTimestampForIndex(index + 1, total, rangeStart, rangeEnd))
+                } else rangeEnd
+                if (startMs >= rangeEnd || endMs <= startMs) null else Triple(index, startMs, endMs)
+            }
+            val items = intervals.map { (index, startMs, endMs) ->
+                val profile = frameColorProfiles[index] ?: throw IllegalStateException("تنظیم رنگ اسلاید پیدا نشد")
                 val effect = RgbAdjustment.Builder()
                     .setRedScale(profile.red).setGreenScale(profile.green).setBlueScale(profile.blue).build()
                 val clippedMedia = MediaItem.Builder().setUri(source)
@@ -610,9 +625,10 @@ class MainActivity : Activity() {
                         .setStartPositionMs(startMs).setEndPositionMs(endMs).build()).build()
                 EditedMediaItem.Builder(clippedMedia).setEffects(Effects(emptyList(), listOf(effect))).build()
             }
-            if (items.isEmpty()) throw IllegalStateException("بازهٔ قابل خروجی پیدا نشد")
-            // Estimate video bitrate from target size and duration. Final size can vary with content and audio.
-            val totalBitsPerSecond = (targetMb.toDouble() * 1024.0 * 1024.0 * 8.0 / (videoDurationMs / 1000.0)).toInt()
+            if (items.isEmpty()) throw IllegalStateException("ابتدا برای اسلایدهای موردنظر تنظیم رنگ ذخیره کنید؛ هیچ بازهٔ رنگی برای خروجی وجود ندارد")
+            val selectedDurationMs = intervals.sumOf { it.third - it.second }.coerceAtLeast(1L)
+            // Estimate bitrate from the total duration of colored intervals, not the full source video.
+            val totalBitsPerSecond = (targetMb.toDouble() * 1024.0 * 1024.0 * 8.0 / (selectedDurationMs / 1000.0)).toInt()
             val videoBitrate = (totalBitsPerSecond - 128_000).coerceIn(200_000, 20_000_000)
             val encoderFactory = DefaultEncoderFactory.Builder(this)
                 .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(videoBitrate).build())
@@ -626,7 +642,7 @@ class MainActivity : Activity() {
                         button.isEnabled = true
                         try {
                             val values = ContentValues().apply {
-                                put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_colorized_${System.currentTimeMillis()}.mp4")
+                                put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_colored_intervals_${System.currentTimeMillis()}.mp4")
                                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                                 if (android.os.Build.VERSION.SDK_INT >= 29) {
                                     put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
@@ -642,8 +658,8 @@ class MainActivity : Activity() {
                             }, null, null)
                             writeOutputInfoReport(outUri)
                             output.delete()
-                            statusText.text = "خروجی رنگی در Movies/EVC ذخیره شد. حجم هدف حدود ${targetMb} MB بود؛ رمزگذاری مجدد انجام شد."
-                            Toast.makeText(this@MainActivity, "خروجی رنگی ذخیره شد؛ حجم نهایی ممکن است با هدف تفاوت داشته باشد", Toast.LENGTH_LONG).show()
+                            statusText.text = "فقط ${intervals.size} بازهٔ دارای تنظیم رنگ در Movies/EVC ذخیره شد؛ حجم هدف حدود ${targetMb} MB بود و رمزگذاری مجدد انجام شد."
+                            Toast.makeText(this@MainActivity, "فقط بازه‌های رنگ‌گذاری‌شده ذخیره شدند؛ حجم نهایی ممکن است با هدف تفاوت داشته باشد", Toast.LENGTH_LONG).show()
                         } catch (e: Exception) {
                             output.delete(); statusText.text = "ذخیرهٔ خروجی ناموفق بود: ${e.message ?: "خطا"}"
                             Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
