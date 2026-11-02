@@ -169,4 +169,18 @@ Selected storyboard export now creates one MP4 file per selected storyboard cell
 - Switching storyboard mode clears the previous timeline range so only explicitly selected storyboard slides are exported.
 
 
-Version 0.2.77 adds a Crop button with centered crop-framing preview presets. This version only changes the player preview; crop-to-export is not implemented yet.
+Version 0.2.77 added a Crop preview-only button.
+
+## Version 0.2.78 — Free Crop and real Crop export
+- Adds free crop margins for the left, top, right, and bottom edges (0–45% per edge).
+- Adds quick presets for no crop, centered crop, and a narrower central frame.
+- Crop settings can be registered and then applied to the actual output video.
+- Exports the cropped MP4 to `Movies/EVC` using Media3 Transformer. Because pixel cropping changes the video image, the video is re-encoded; the source file is not overwritten. Audio is passed through the export composition.
+- This source ZIP was not built locally in this environment because a Gradle executable/wrapper is not present; verify the GitHub Actions build before installing the APK.
+
+
+## Version 0.2.79 — Button sizing refinement
+- Reduced the five buttons in the top main action row from 60dp to 48dp.
+- Increased the three buttons in the bottom timeline action row from 60dp to 66dp.
+- No behavior or export logic was intentionally changed.
+- Build still needs verification through GitHub Actions.
