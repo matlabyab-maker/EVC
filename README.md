@@ -11,7 +11,7 @@ First incremental build: video selection and playback only.
 ## Build
 Open this folder as an Android project in Android Studio, or push the project files to a new GitHub repository named `EVC`. GitHub Actions runs on push and manual dispatch.
 
-No `.git` directory is included: initialize a fresh repository for EVC so the old EsCut remote/history is not accidentally reused.
+This project ZIP includes the EVC `.git` history and the latest commit. Before pushing to a different GitHub repository, check the configured remote so the project is not pushed to an unintended destination.
 
 ## Scope of this first version
 This version does not cut video yet. The only app capability is selecting and playing a video. Build and device playback still need verification in GitHub Actions / on the target device.
