@@ -49,6 +49,7 @@ import androidx.media3.transformer.Composition
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ExportException
 import androidx.media3.effect.RgbAdjustment
+import androidx.media3.effect.Saturation
 import java.util.concurrent.Executors
 import java.io.File
 import java.io.FileInputStream
@@ -86,11 +87,13 @@ class MainActivity : Activity() {
     private var storyboardEndMs = 0L
     private var storyboardIntervalMs: Long? = null
     private var storyboardGeneration = 0
-    private data class RgbProfile(val red: Float, val green: Float, val blue: Float)
+    private data class RgbProfile(val red: Float, val green: Float, val blue: Float, val saturation: Float)
     private val frameColorProfiles = mutableMapOf<Int, RgbProfile>()
     private val mergeUris = mutableListOf<Uri>()
     private val PICK_MERGE_VIDEOS = 7304
     private val PICK_REFERENCE_IMAGE = 7305
+    private val PICK_VECTOR_VIDEOS = 7306
+    private val vectorUris = mutableListOf<Uri>()
     private var referenceImageUri: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -148,6 +151,8 @@ class MainActivity : Activity() {
 
         findViewById<Button>(R.id.openButton).setOnClickListener { chooseVideo() }
         findViewById<Button>(R.id.mergeButton).setOnClickListener { if (mergeUris.isEmpty()) chooseVideosForMerge() else mergeSelectedVideos() }
+        findViewById<Button>(R.id.vectorButton).setOnClickListener { chooseVideosForVector() }
+        findViewById<Button>(R.id.advancedEditButton).setOnClickListener { showAdvancedEditDialog() }
         findViewById<Button>(R.id.imageSceneSearchButton).setOnClickListener { chooseReferenceImage() }
         findViewById<Button>(R.id.selectAllButton).setOnClickListener {
             if (selectedUri == null || videoDurationMs <= 0L) {
@@ -255,6 +260,94 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun chooseVideosForVector() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "video/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, PICK_VECTOR_VIDEOS)
+    }
+
+    private fun showVectorPreview() {
+        val count = vectorUris.size
+        val cols = when (count) { 1 -> 1; 2, 3, 4 -> 2; else -> 3 }
+        val rows = (count + cols - 1) / cols
+        val grid = android.widget.GridLayout(this).apply {
+            columnCount = cols; rowCount = rows
+            setBackgroundColor(Color.BLACK)
+            useDefaultMargins = false
+            alignmentMode = android.widget.GridLayout.ALIGN_BOUNDS
+        }
+        val players = mutableListOf<VideoView>()
+        vectorUris.forEachIndexed { index, uri ->
+            val player = VideoView(this)
+            val lp = android.widget.GridLayout.LayoutParams().apply {
+                width = 0; height = 0
+                columnSpec = android.widget.GridLayout.spec(index % cols, 1, 1f)
+                rowSpec = android.widget.GridLayout.spec(index / cols, 1, 1f)
+                setMargins(0, 0, 0, 0)
+            }
+            player.layoutParams = lp
+            player.setVideoURI(uri)
+            player.setOnPreparedListener { mp -> mp.isLooping = true }
+            grid.addView(player); players.add(player)
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 0)
+            addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(TextView(this@MainActivity).apply {
+                text = "پیش‌نمایش چیدمان فشرده: $count ویدیو • فاصلهٔ قاب‌ها صفر"
+                setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER
+                setPadding(4, 6, 4, 6)
+            })
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("Vector • پیش‌نمایش چیدمان")
+            .setView(container)
+            .setPositiveButton("پخش هم‌زمان", null)
+            .setNeutralButton("انتخاب دوباره", null)
+            .setNegativeButton("بستن", null).create()
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.78f).toInt())
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                players.forEach { it.seekTo(0); it.start() }
+                statusText.text = "Vector: پیش‌نمایش $count ویدیو؛ قاب‌ها بدون فاصله هستند. خروجی ترکیبی هنوز در این نسخه پیاده‌سازی نشده است."
+                Toast.makeText(this, "پخش پیش‌نمایش آغاز شد؛ خروجی ترکیبی هنوز آماده نیست", Toast.LENGTH_LONG).show()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { dialog.dismiss(); chooseVideosForVector() }
+        }
+        dialog.show()
+    }
+
+    private fun showAdvancedEditDialog() {
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 8, 24, 8) }
+        fun addControl(label: String, maxValue: Int, initial: Int, onValue: (Int) -> Unit) {
+            panel.addView(TextView(this).apply { text = "$label: ${initial}%"; setTextColor(Color.WHITE); textSize = 13f })
+            panel.addView(SeekBar(this).apply {
+                max = maxValue; progress = initial
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                        (panel.getChildAt(panel.childCount - 2) as TextView).text = "$label: ${progress}%"
+                        onValue(progress)
+                    }
+                    override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                    override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                })
+            })
+        }
+        var brightness = 100; var contrast = 100; var gamma = 100
+        addControl("نور", 200, 100) { brightness = it }
+        addControl("کنتراست", 200, 100) { contrast = it }
+        addControl("گاما", 300, 100) { gamma = it }
+        AlertDialog.Builder(this).setTitle("ویرایش پیشرفته")
+            .setView(ScrollView(this).apply { addView(panel) })
+            .setPositiveButton("اعمال", null).setNegativeButton("بستن", null).show()
+            .getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                Toast.makeText(this, "مقادیر نور $brightness٪، کنتراست $contrast٪ و گاما $gamma٪ انتخاب شدند؛ اتصال این تنظیمات به موتور خروجی در نسخهٔ بعدی لازم است.", Toast.LENGTH_LONG).show()
+            }
+    }
+
     private fun chooseVideosForMerge() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -281,6 +374,13 @@ class MainActivity : Activity() {
             }
             findViewById<Button>(R.id.mergeButton).text = "Merge (${mergeUris.size})"
             statusText.text = "${mergeUris.size} ویدیو برای ادغام آماده است؛ دکمهٔ Merge را دوباره بزنید"
+        } else if (requestCode == PICK_VECTOR_VIDEOS) {
+            val picked = mutableListOf<Uri>()
+            data.clipData?.let { clip -> for (i in 0 until clip.itemCount) picked.add(clip.getItemAt(i).uri) }
+            data.data?.let { if (it !in picked) picked.add(it) }
+            vectorUris.clear(); vectorUris.addAll(picked.distinct().take(6))
+            if (vectorUris.isEmpty()) return
+            showVectorPreview()
         } else if (requestCode == REQUEST_VIDEO) {
             val uri = data.data ?: return
             loadSelectedVideo(uri, true)
@@ -475,6 +575,8 @@ class MainActivity : Activity() {
         val red = findViewById<SeekBar>(R.id.redColorSeek)
         val green = findViewById<SeekBar>(R.id.greenColorSeek)
         val blue = findViewById<SeekBar>(R.id.blueColorSeek)
+        val saturation = findViewById<SeekBar>(R.id.saturationSeek)
+        val saturationValue = findViewById<TextView>(R.id.saturationValue)
         val redValue = findViewById<TextView>(R.id.redColorValue)
         val greenValue = findViewById<TextView>(R.id.greenColorValue)
         val blueValue = findViewById<TextView>(R.id.blueColorValue)
@@ -482,6 +584,7 @@ class MainActivity : Activity() {
             redValue.text = "قرمز ${"%.2f".format(java.util.Locale.US, red.progress / 100f)}"
             greenValue.text = "سبز ${"%.2f".format(java.util.Locale.US, green.progress / 100f)}"
             blueValue.text = "آبی ${"%.2f".format(java.util.Locale.US, blue.progress / 100f)}"
+            saturationValue.text = "اشباع رنگ ${"%.2f".format(java.util.Locale.US, saturation.progress / 100f)}"
         }
         val listener = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -494,6 +597,7 @@ class MainActivity : Activity() {
         red.setOnSeekBarChangeListener(listener)
         green.setOnSeekBarChangeListener(listener)
         blue.setOnSeekBarChangeListener(listener)
+        saturation.setOnSeekBarChangeListener(listener)
         updateLabels()
     }
 
@@ -517,7 +621,7 @@ class MainActivity : Activity() {
         val current = currentRgbProfile()
         for ((index, original) in frameBitmaps) {
             if (original.isRecycled) continue
-            val profile = if (selectedFrames.isEmpty() || index in selectedFrames) current else frameColorProfiles[index] ?: RgbProfile(1f, 1f, 1f)
+            val profile = if (selectedFrames.isEmpty() || index in selectedFrames) current else frameColorProfiles[index] ?: RgbProfile(1f, 1f, 1f, 1f)
             val tinted = tintBitmap(original, profile)
             previewBitmaps.put(index, tinted)?.let { old -> if (!old.isRecycled) old.recycle() }
             val cell = frameViews[index]
@@ -566,10 +670,15 @@ class MainActivity : Activity() {
         source.getPixels(pixels, 0, w, 0, 0, w, h)
         for (i in pixels.indices) {
             val c = pixels[i]
+            val r = (Color.red(c) * profile.red).coerceIn(0f, 255f)
+            val g = (Color.green(c) * profile.green).coerceIn(0f, 255f)
+            val b = (Color.blue(c) * profile.blue).coerceIn(0f, 255f)
+            val gray = 0.213f * r + 0.715f * g + 0.072f * b
+            val sat = profile.saturation
             pixels[i] = Color.argb(Color.alpha(c),
-                (Color.red(c) * profile.red).toInt().coerceIn(0, 255),
-                (Color.green(c) * profile.green).toInt().coerceIn(0, 255),
-                (Color.blue(c) * profile.blue).toInt().coerceIn(0, 255))
+                (gray + (r - gray) * sat).toInt().coerceIn(0, 255),
+                (gray + (g - gray) * sat).toInt().coerceIn(0, 255),
+                (gray + (b - gray) * sat).toInt().coerceIn(0, 255))
         }
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.setPixels(pixels, 0, w, 0, 0, w, h) }
     }
@@ -577,7 +686,8 @@ class MainActivity : Activity() {
     private fun currentRgbProfile() = RgbProfile(
         findViewById<SeekBar>(R.id.redColorSeek).progress / 100f,
         findViewById<SeekBar>(R.id.greenColorSeek).progress / 100f,
-        findViewById<SeekBar>(R.id.blueColorSeek).progress / 100f
+        findViewById<SeekBar>(R.id.blueColorSeek).progress / 100f,
+        findViewById<SeekBar>(R.id.saturationSeek).progress / 100f
     )
 
     /** Exports the full video with an independently saved RGB effect for each storyboard interval. */
@@ -620,10 +730,11 @@ class MainActivity : Activity() {
                 val profile = frameColorProfiles[index] ?: throw IllegalStateException("تنظیم رنگ اسلاید پیدا نشد")
                 val effect = RgbAdjustment.Builder()
                     .setRedScale(profile.red).setGreenScale(profile.green).setBlueScale(profile.blue).build()
+                val saturationEffect = Saturation(profile.saturation)
                 val clippedMedia = MediaItem.Builder().setUri(source)
                     .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
                         .setStartPositionMs(startMs).setEndPositionMs(endMs).build()).build()
-                EditedMediaItem.Builder(clippedMedia).setEffects(Effects(emptyList(), listOf(effect))).build()
+                EditedMediaItem.Builder(clippedMedia).setEffects(Effects(emptyList(), listOf(effect, saturationEffect))).build()
             }
             if (items.isEmpty()) throw IllegalStateException("ابتدا برای اسلایدهای موردنظر تنظیم رنگ ذخیره کنید؛ هیچ بازهٔ رنگی برای خروجی وجود ندارد")
             val selectedDurationMs = intervals.sumOf { it.third - it.second }.coerceAtLeast(1L)
@@ -1666,19 +1777,21 @@ class TimelineView(context: android.content.Context, attrs: android.util.Attribu
                 val dst = RectF(max(left, prevX), top, minOf(right, nextX), bottom)
                 if (dst.width() > 0f && dst.height() > 0f) {
                     val bitmap = frame.second
-                    // Fit the complete frame into its time cell: never crop away image content.
+                    // Fill each timeline time-cell like a thumbnail preview; do not shrink
+                    // the cell or leave letterbox gaps. Center-crop only the image to the cell.
                     val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
                     val targetRatio = dst.width() / dst.height()
-                    val fit = if (bitmapRatio > targetRatio) {
-                        val fittedHeight = dst.width() / bitmapRatio
-                        RectF(dst.left, dst.centerY() - fittedHeight / 2f, dst.right, dst.centerY() + fittedHeight / 2f)
+                    val source = if (bitmapRatio > targetRatio) {
+                        val cropWidth = (bitmap.height * targetRatio).toInt().coerceIn(1, bitmap.width)
+                        val leftCrop = (bitmap.width - cropWidth) / 2
+                        Rect(leftCrop, 0, leftCrop + cropWidth, bitmap.height)
                     } else {
-                        val fittedWidth = dst.height() * bitmapRatio
-                        RectF(dst.centerX() - fittedWidth / 2f, dst.top, dst.centerX() + fittedWidth / 2f, dst.bottom)
+                        val cropHeight = (bitmap.width / targetRatio).toInt().coerceIn(1, bitmap.height)
+                        val topCrop = (bitmap.height - cropHeight) / 2
+                        Rect(0, topCrop, bitmap.width, topCrop + cropHeight)
                     }
                     paint.color = Color.WHITE
-                    canvas.drawRect(dst, backgroundPaint)
-                    canvas.drawBitmap(bitmap, null, fit, paint)
+                    canvas.drawBitmap(bitmap, source, dst, paint)
                 }
             }
             canvas.restoreToCount(save)
