@@ -5,7 +5,7 @@
 
     <TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="یک ویدیو انتخاب کنید تا ۱۲۰ فریم در ۸ ردیف ساخته شود" android:textColor="#B9D7FF" android:textSize="12sp" android:gravity="center" android:paddingBottom="1dp" />
 
-    <FrameLayout android:layout_width="match_parent" android:layout_height="102dp" android:background="#000000">
+    <FrameLayout android:layout_width="match_parent" android:layout_height="180dp" android:background="#000000">
         <VideoView android:id="@+id/videoView" android:layout_width="match_parent" android:layout_height="match_parent" />
         <ImageView android:id="@+id/playerColorPreview" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:contentDescription="پیش‌نمایش رنگ فریم فعلی" android:visibility="gone" />
         <TextView android:id="@+id/emptyHint" android:layout_width="match_parent" android:layout_height="match_parent" android:text="▶  پخش‌کنندهٔ EVC" android:textColor="#D7E7FF" android:textSize="20sp" android:gravity="center" android:background="#101F3D" />
@@ -13,8 +13,10 @@
 
 
     
-    <Button android:id="@+id/mergeButton" android:layout_width="match_parent" android:layout_height="30dp" android:layout_marginTop="1dp" android:layout_marginBottom="1dp" android:minHeight="0dp" android:text="Merge • انتخاب چند ویدیو" android:textSize="11sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#70AEFF" android:paddingLeft="4dp" android:paddingRight="4dp" />
-    <Button android:id="@+id/imageSceneSearchButton" android:layout_width="match_parent" android:layout_height="30dp" android:layout_marginTop="1dp" android:layout_marginBottom="1dp" android:minHeight="0dp" android:text="جست‌وجوی صحنه با عکس و نمایش اسلایدشو" android:textSize="11sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#D7A6FF" android:paddingLeft="4dp" android:paddingRight="4dp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="1dp" android:paddingBottom="1dp">
+        <Button android:id="@+id/mergeButton" android:layout_width="0dp" android:layout_height="25dp" android:layout_weight="0.8" android:layout_marginEnd="3dp" android:minHeight="0dp" android:minWidth="0dp" android:text="Merge • انتخاب چند ویدیو" android:textSize="9sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#70AEFF" android:paddingLeft="2dp" android:paddingRight="2dp" />
+        <Button android:id="@+id/imageSceneSearchButton" android:layout_width="0dp" android:layout_height="25dp" android:layout_weight="1.2" android:minHeight="0dp" android:minWidth="0dp" android:text="جست‌وجوی صحنه با عکس و نمایش اسلایدشو" android:textSize="9sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#D7A6FF" android:paddingLeft="2dp" android:paddingRight="2dp" />
+    </LinearLayout>
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="1dp" android:paddingBottom="1dp">
         <Button android:id="@+id/colorizePreviewButton" android:layout_width="0dp" android:layout_height="33dp" android:layout_weight="1" android:layout_marginEnd="3dp" android:minHeight="0dp" android:paddingLeft="5dp" android:paddingRight="5dp" android:text="خروجی رنگی" android:textSize="11sp" android:textColor="#07142F" android:textStyle="bold" android:backgroundTint="#D7A6FF" />
