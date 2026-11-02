@@ -49,7 +49,7 @@ import androidx.media3.transformer.Composition
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ExportException
 import androidx.media3.effect.RgbAdjustment
-import androidx.media3.effect.Saturation
+import androidx.media3.effect.HslAdjustment
 import java.util.concurrent.Executors
 import java.io.File
 import java.io.FileInputStream
@@ -730,7 +730,7 @@ class MainActivity : Activity() {
                 val profile = frameColorProfiles[index] ?: throw IllegalStateException("تنظیم رنگ اسلاید پیدا نشد")
                 val effect = RgbAdjustment.Builder()
                     .setRedScale(profile.red).setGreenScale(profile.green).setBlueScale(profile.blue).build()
-                val saturationEffect = Saturation(profile.saturation)
+                val saturationEffect = HslAdjustment.Builder().adjustSaturation(((profile.saturation - 1f) * 100f).coerceIn(-100f, 100f)).build()
                 val clippedMedia = MediaItem.Builder().setUri(source)
                     .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
                         .setStartPositionMs(startMs).setEndPositionMs(endMs).build()).build()
