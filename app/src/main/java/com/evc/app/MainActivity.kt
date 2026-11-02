@@ -50,6 +50,9 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ExportException
 import androidx.media3.effect.RgbAdjustment
 import androidx.media3.effect.HslAdjustment
+import androidx.media3.effect.Crop
+import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.ReturnCode
 import java.util.concurrent.Executors
 import java.io.File
 import java.io.FileInputStream
@@ -95,12 +98,27 @@ class MainActivity : Activity() {
     private val PICK_VECTOR_VIDEOS = 7306
     private val vectorUris = mutableListOf<Uri>()
     private var referenceImageUri: Uri? = null
+    // Crop margins are stored as percentages of the source frame and reused for export.
+    private var cropLeftPct = 0
+    private var cropTopPct = 0
+    private var cropRightPct = 0
+    private var cropBottomPct = 0
+    private var cropSettingsSaved = false
+    // Applies to original-quality stream-copy exports (main export, timeline, storyboard segments).
+    private var outputContainerMatroska = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         videoView = findViewById(R.id.videoView)
         findViewById<Button>(R.id.cropButton).setOnClickListener { showCropOptions() }
+        findViewById<Button>(R.id.outputFormatButton).setOnClickListener {
+            outputContainerMatroska = !outputContainerMatroska
+            findViewById<Button>(R.id.outputFormatButton).text = if (outputContainerMatroska) "فرمت: MKV" else "فرمت: MP4"
+            statusText.text = if (outputContainerMatroska)
+                "فرمت خروجی بدون رمزگذاری مجدد: MKV؛ ترک‌ها با FFmpeg کپی می‌شوند"
+            else "فرمت خروجی بدون رمزگذاری مجدد: MP4"
+        }
 
         playerColorPreview = findViewById(R.id.playerColorPreview)
         statusText = findViewById(R.id.statusText)
@@ -1197,7 +1215,7 @@ class MainActivity : Activity() {
             val extractor = MediaExtractor()
             extractor.setDataSource(this, videoUri, null)
             val report = StringBuilder()
-            report.append("General\nComplete name : ").append(displayName).append("\nFormat : MP4 container (inferred from saved file type)\nFile size : ")
+            report.append("General\nComplete name : ").append(displayName).append("\nFormat : ").append(if (displayName.endsWith(".mkv", true)) "Matroska (MKV)" else "MP4 container").append("\nFile size : ")
                 .append(if (size >= 0) String.format(java.util.Locale.US, "%.2f KiB", size / 1024.0) else "Not available")
                 .append("\nDuration : ").append(duration).append("\nEncoded date : ").append(date).append("\n\n")
             var videoIndex = 0
@@ -1268,8 +1286,8 @@ class MainActivity : Activity() {
                 try {
                     temp = muxRemainingRanges(source, listOf(range))
                     val values = ContentValues().apply {
-                        put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_segment_${(index + 1).toString().padStart(3, '0')}_${System.currentTimeMillis()}.mp4")
-                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_segment_${(index + 1).toString().padStart(3, '0')}_${System.currentTimeMillis()}.${outputExtension()}")
+                        put(MediaStore.Video.Media.MIME_TYPE, outputMimeType())
                         if (android.os.Build.VERSION.SDK_INT >= 29) {
                             put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
                             put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -1300,32 +1318,167 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Crop framing controls for the player preview. This does not alter the source file or export yet. */
+    /** Configure and save crop margins, then export the actual cropped video through Media3 Transformer. */
     private fun showCropOptions() {
-        val choices = arrayOf("بدون برش (بازنشانی)", "برش مرکزی 16:9", "برش مربعی 1:1", "برش عمودی 9:16")
-        AlertDialog.Builder(this)
-            .setTitle("Crop • برش کادر")
-            .setItems(choices) { _, which ->
-                if (which == 0) {
-                    videoView.scaleX = 1f
-                    videoView.scaleY = 1f
-                    playerColorPreview.scaleX = 1f
-                    playerColorPreview.scaleY = 1f
-                    statusText.text = "کادر پیش‌نمایش به حالت اصلی برگشت"
-                } else {
-                    // A clipped, centered zoom provides a visual framing preview.
-                    // Actual crop-to-file export requires a separate re-encoding pipeline.
-                    val zoom = when (which) { 1 -> 1.12f; 2 -> 1.45f; else -> 1.75f }
-                    videoView.scaleX = zoom
-                    videoView.scaleY = zoom
-                    playerColorPreview.scaleX = zoom
-                    playerColorPreview.scaleY = zoom
-                    statusText.text = "پیش‌نمایش Crop فعال شد؛ این نسخه هنوز برش را در فایل خروجی اعمال نمی‌کند"
+        if (selectedUri == null) {
+            Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_LONG).show()
+            return
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(28, 12, 28, 4)
+        }
+        val info = TextView(this).apply {
+            text = "برش آزاد: مقدار هر لبه را جداگانه تنظیم کنید. پس از ثبت، با «خروجی Crop» برش روی فایل واقعی اعمال می‌شود."
+            textSize = 14f
+            setTextColor(Color.WHITE)
+        }
+        panel.addView(info)
+        val sliders = mutableListOf<SeekBar>()
+        val values = mutableListOf<TextView>()
+        val labels = listOf("چپ", "بالا", "راست", "پایین")
+        val initial = listOf(cropLeftPct, cropTopPct, cropRightPct, cropBottomPct)
+        labels.forEachIndexed { index, label ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val value = TextView(this).apply { text = "$label: ${initial[index]}٪"; setTextColor(Color.WHITE); textSize = 13f }
+            val slider = SeekBar(this).apply { max = 45; progress = initial[index] }
+            values.add(value); sliders.add(slider)
+            slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    value.text = "$label: ${progress}٪"
                 }
-                Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+            row.addView(value); row.addView(slider)
+            panel.addView(row)
+        }
+        val presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun presetButton(text: String, l: Int, t: Int, r: Int, b: Int) {
+            val button = Button(this).apply {
+                this.text = text
+                textSize = 10f
+                setOnClickListener {
+                    val preset = listOf(l, t, r, b)
+                    sliders.forEachIndexed { i, seek -> seek.progress = preset[i] }
+                }
             }
+            presets.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        presetButton("بدون برش", 0, 0, 0, 0)
+        presetButton("مرکزی", 10, 10, 10, 10)
+        presetButton("عمودی", 22, 0, 22, 0)
+        panel.addView(presets)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Crop • برش آزاد")
+            .setView(ScrollView(this).apply { addView(panel) })
+            .setPositiveButton("ثبت برش", null)
+            .setNeutralButton("خروجی Crop", null)
             .setNegativeButton("لغو", null)
-            .show()
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val m = sliders.map { it.progress }
+                if (m[0] + m[2] >= 90 || m[1] + m[3] >= 90) {
+                    Toast.makeText(this, "باید بخشی از تصویر در هر دو جهت باقی بماند", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                cropLeftPct = m[0]; cropTopPct = m[1]; cropRightPct = m[2]; cropBottomPct = m[3]
+                cropSettingsSaved = true
+                // Keep the preview visibly marked as modified; actual crop is applied during export.
+                val zoomX = (100f / (100 - cropLeftPct - cropRightPct)).coerceIn(1f, 2.5f)
+                val zoomY = (100f / (100 - cropTopPct - cropBottomPct)).coerceIn(1f, 2.5f)
+                videoView.scaleX = zoomX
+                videoView.scaleY = zoomY
+                playerColorPreview.scaleX = zoomX
+                playerColorPreview.scaleY = zoomY
+                statusText.text = "Crop ثبت شد: چپ $cropLeftPct٪، بالا $cropTopPct٪، راست $cropRightPct٪، پایین $cropBottomPct٪؛ برای ساخت فایل، خروجی Crop را بزنید"
+                Toast.makeText(this, "تنظیمات برش ثبت شد", Toast.LENGTH_SHORT).show()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val m = sliders.map { it.progress }
+                if (m[0] + m[2] >= 90 || m[1] + m[3] >= 90) {
+                    Toast.makeText(this, "باید بخشی از تصویر در هر دو جهت باقی بماند", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                cropLeftPct = m[0]; cropTopPct = m[1]; cropRightPct = m[2]; cropBottomPct = m[3]
+                cropSettingsSaved = true
+                dialog.dismiss()
+                exportCroppedVideo()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun exportCroppedVideo() {
+        val source = selectedUri
+        if (source == null) {
+            Toast.makeText(this, "ابتدا یک ویدیو انتخاب کنید", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!cropSettingsSaved) {
+            Toast.makeText(this, "ابتدا تنظیمات Crop را ثبت کنید", Toast.LENGTH_LONG).show()
+            return
+        }
+        val output = File(cacheDir, "evc_crop_${System.currentTimeMillis()}.mp4")
+        val button = findViewById<Button>(R.id.cropButton)
+        button.isEnabled = false
+        statusText.text = "در حال اعمال Crop واقعی و رمزگذاری مجدد ویدیو…"
+        try {
+            val left = (-1f + 2f * cropLeftPct / 100f).coerceIn(-1f, 0.98f)
+            val right = (1f - 2f * cropRightPct / 100f).coerceIn(-0.98f, 1f)
+            val top = (1f - 2f * cropTopPct / 100f).coerceIn(-0.98f, 1f)
+            val bottom = (-1f + 2f * cropBottomPct / 100f).coerceIn(-1f, 0.98f)
+            val cropEffect = Crop(left, right, bottom, top)
+            val item = EditedMediaItem.Builder(MediaItem.fromUri(source))
+                .setEffects(Effects(emptyList(), listOf(cropEffect)))
+                .build()
+            val composition = Composition.Builder(EditedMediaItemSequence.Builder(item).build()).build()
+            val transformer = Transformer.Builder(this)
+                .addListener(object : Transformer.Listener {
+                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                        activeTransformer = null
+                        try {
+                            val values = ContentValues().apply {
+                                put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_Crop_${System.currentTimeMillis()}.mp4")
+                                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
+                                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                                }
+                            }
+                            val outUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                                ?: throw IllegalStateException("ساخت فایل در Movies/EVC ممکن نشد")
+                            contentResolver.openOutputStream(outUri)?.use { out -> FileInputStream(output).use { it.copyTo(out) } }
+                                ?: throw IllegalStateException("نوشتن فایل Crop ناموفق بود")
+                            if (android.os.Build.VERSION.SDK_INT >= 29) contentResolver.update(outUri, ContentValues().apply {
+                                put(MediaStore.Video.Media.IS_PENDING, 0)
+                            }, null, null)
+                            writeOutputInfoReport(outUri)
+                            output.delete()
+                            button.isEnabled = true
+                            statusText.text = "خروجی Crop واقعی در Movies/EVC ذخیره شد. برای اعمال برش، ویدیو رمزگذاری مجدد شده است."
+                            Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            output.delete(); button.isEnabled = true
+                            statusText.text = "ذخیرهٔ Crop ناموفق بود: ${e.message ?: "خطا"}"
+                            Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                        activeTransformer = null; output.delete(); button.isEnabled = true
+                        statusText.text = "خروجی Crop ناموفق بود: ${exportException.message ?: "خطای رمزگذاری"}"
+                        Toast.makeText(this@MainActivity, statusText.text, Toast.LENGTH_LONG).show()
+                    }
+                }).build()
+            activeTransformer = transformer
+            transformer.start(composition, output.absolutePath)
+        } catch (e: Exception) {
+            activeTransformer = null; output.delete(); button.isEnabled = true
+            statusText.text = "شروع خروجی Crop ناموفق بود: ${e.message ?: "خطا"}"
+            Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun exportRemainingVideo(onlySelected: Boolean = false) {
@@ -1407,8 +1560,8 @@ class MainActivity : Activity() {
                 if (file != null && file.exists() && file.length() > 0L) {
                     try {
                         val values = ContentValues().apply {
-                            put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_edited_${System.currentTimeMillis()}.mp4")
-                            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                            put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_edited_${System.currentTimeMillis()}.${outputExtension()}")
+                            put(MediaStore.Video.Media.MIME_TYPE, outputMimeType())
                             if (android.os.Build.VERSION.SDK_INT >= 29) {
                                 put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
                                 put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -1465,8 +1618,8 @@ class MainActivity : Activity() {
                 }
                 try {
                     val values = ContentValues().apply {
-                        put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_timeline_${System.currentTimeMillis()}.mp4")
-                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_timeline_${System.currentTimeMillis()}.${outputExtension()}")
+                        put(MediaStore.Video.Media.MIME_TYPE, outputMimeType())
                         if (android.os.Build.VERSION.SDK_INT >= 29) {
                             put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
                             put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -1543,8 +1696,8 @@ class MainActivity : Activity() {
             try {
                 temp = muxRemainingRanges(source, selectedRanges)
                 val values = ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_selected_storyboard_${System.currentTimeMillis()}.mp4")
-                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Video.Media.DISPLAY_NAME, "EVC_selected_storyboard_${System.currentTimeMillis()}.${outputExtension()}")
+                    put(MediaStore.Video.Media.MIME_TYPE, outputMimeType())
                     if (android.os.Build.VERSION.SDK_INT >= 29) {
                         put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/EVC")
                         put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -1579,7 +1732,68 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun outputExtension(): String = if (outputContainerMatroska) "mkv" else "mp4"
+    private fun outputMimeType(): String = if (outputContainerMatroska) "video/x-matroska" else "video/mp4"
+
+    /**
+     * Builds an MKV output using FFmpeg stream-copy only: no audio/video re-encoding.
+     * The source URI is copied to cache first so document-provider URIs work too.
+     * Stream-copy cuts are keyframe-dependent and may not land on the exact requested frame.
+     */
+    private fun muxRangesToMatroska(source: Uri, ranges: List<Pair<Long, Long>>): File {
+        val stamp = System.currentTimeMillis()
+        val input = File(cacheDir, "evc_mkv_source_$stamp.bin")
+        val segments = mutableListOf<File>()
+        val concatList = File(cacheDir, "evc_mkv_concat_$stamp.txt")
+        val output = File(cacheDir, "evc_export_$stamp.mkv")
+        try {
+            contentResolver.openInputStream(source)?.use { src ->
+                input.outputStream().use { dst -> src.copyTo(dst) }
+            } ?: throw IllegalStateException("خواندن فایل ویدیوی اصلی ممکن نشد")
+            if (input.length() == 0L) throw IllegalStateException("فایل ویدیوی اصلی خالی است")
+
+            ranges.filter { it.second > it.first }.forEachIndexed { index, range ->
+                val segment = File(cacheDir, "evc_mkv_part_${stamp}_$index.mkv")
+                val start = range.first.coerceAtLeast(0L) / 1000.0
+                val duration = (range.second - range.first).coerceAtLeast(0L) / 1000.0
+                if (duration <= 0.0) return@forEachIndexed
+                val args = arrayOf(
+                    "-y", "-ss", String.format(java.util.Locale.US, "%.3f", start),
+                    "-i", input.absolutePath, "-t", String.format(java.util.Locale.US, "%.3f", duration),
+                    "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero",
+                    "-f", "matroska", segment.absolutePath
+                )
+                val session = FFmpegKit.executeWithArguments(args)
+                if (!ReturnCode.isSuccess(session.returnCode) || !segment.exists() || segment.length() == 0L) {
+                    throw IllegalStateException("ساخت قطعهٔ MKV ناموفق بود: ${session.allLogsAsString.takeLast(900)}")
+                }
+                segments.add(segment)
+            }
+            if (segments.isEmpty()) throw IllegalStateException("هیچ بازهٔ معتبری برای خروجی MKV وجود ندارد")
+            concatList.writeText(segments.joinToString("\n") { segment ->
+                "file '${segment.absolutePath.replace("'", "'\\''")}'"
+            } + "\n")
+            val concatArgs = arrayOf(
+                "-y", "-f", "concat", "-safe", "0", "-i", concatList.absolutePath,
+                "-map", "0", "-c", "copy", "-f", "matroska", output.absolutePath
+            )
+            val concatSession = FFmpegKit.executeWithArguments(concatArgs)
+            if (!ReturnCode.isSuccess(concatSession.returnCode) || !output.exists() || output.length() == 0L) {
+                throw IllegalStateException("ادغام قطعات MKV ناموفق بود: ${concatSession.allLogsAsString.takeLast(900)}")
+            }
+            return output
+        } catch (e: Exception) {
+            output.delete()
+            throw e
+        } finally {
+            input.delete()
+            concatList.delete()
+            segments.forEach { it.delete() }
+        }
+    }
+
     private fun muxRemainingRanges(source: Uri, ranges: List<Pair<Long, Long>>): File {
+        if (outputContainerMatroska) return muxRangesToMatroska(source, ranges)
         val probe = MediaExtractor()
         probe.setDataSource(this, source, null)
         val videoTrack = (0 until probe.trackCount).firstOrNull {

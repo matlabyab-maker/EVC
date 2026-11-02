@@ -11,8 +11,8 @@ android {
         applicationId = "com.evc.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 279
-        versionName = "0.2.79"
+        versionCode = 280
+        versionName = "0.2.80"
     }
 
     buildTypes {
@@ -38,4 +38,6 @@ dependencies {
     implementation("androidx.media3:media3-transformer:1.5.1")
     implementation("androidx.media3:media3-effect:1.5.1")
     implementation("androidx.media3:media3-common:1.5.1")
+    // FFmpeg muxing enables Matroska (MKV) output while copying existing streams.
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:6.0.4")
 }

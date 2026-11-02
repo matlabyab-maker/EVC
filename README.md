@@ -184,3 +184,13 @@ Version 0.2.77 added a Crop preview-only button.
 - Increased the three buttons in the bottom timeline action row from 60dp to 66dp.
 - No behavior or export logic was intentionally changed.
 - Build still needs verification through GitHub Actions.
+
+
+## Version 0.2.80 — MKV output for stream-copy exports
+
+- Added a `فرمت: MP4 / MKV` toggle in the horizontal tools strip.
+- The toggle applies to original-quality stream-copy exports: edited remaining ranges, timeline range, selected storyboard ranges, and separate timeline segments.
+- MKV uses the maintained FFmpegKit Android package and stream-copy (`-c copy`) operations; it does not re-encode audio/video. For stream-copy cuts, boundaries may align to keyframes and are not guaranteed frame-exact.
+- MP4 remains the default. Merge, colorized export, and crop export remain on their existing Media3/MP4 path in this version.
+- Dependency: `dev.ffmpegkit-maintained:ffmpeg-kit-full:6.0.4` from Maven Central.
+- GitHub Actions build and on-device MKV playback/export still need verification.
