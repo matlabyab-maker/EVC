@@ -100,6 +100,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         videoView = findViewById(R.id.videoView)
+        findViewById<Button>(R.id.cropButton).setOnClickListener { showCropOptions() }
+
         playerColorPreview = findViewById(R.id.playerColorPreview)
         statusText = findViewById(R.id.statusText)
         emptyHint = findViewById(R.id.emptyHint)
@@ -1296,6 +1298,34 @@ class MainActivity : Activity() {
                 Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    /** Crop framing controls for the player preview. This does not alter the source file or export yet. */
+    private fun showCropOptions() {
+        val choices = arrayOf("بدون برش (بازنشانی)", "برش مرکزی 16:9", "برش مربعی 1:1", "برش عمودی 9:16")
+        AlertDialog.Builder(this)
+            .setTitle("Crop • برش کادر")
+            .setItems(choices) { _, which ->
+                if (which == 0) {
+                    videoView.scaleX = 1f
+                    videoView.scaleY = 1f
+                    playerColorPreview.scaleX = 1f
+                    playerColorPreview.scaleY = 1f
+                    statusText.text = "کادر پیش‌نمایش به حالت اصلی برگشت"
+                } else {
+                    // A clipped, centered zoom provides a visual framing preview.
+                    // Actual crop-to-file export requires a separate re-encoding pipeline.
+                    val zoom = when (which) { 1 -> 1.12f; 2 -> 1.45f; else -> 1.75f }
+                    videoView.scaleX = zoom
+                    videoView.scaleY = zoom
+                    playerColorPreview.scaleX = zoom
+                    playerColorPreview.scaleY = zoom
+                    statusText.text = "پیش‌نمایش Crop فعال شد؛ این نسخه هنوز برش را در فایل خروجی اعمال نمی‌کند"
+                }
+                Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("لغو", null)
+            .show()
     }
 
     private fun exportRemainingVideo(onlySelected: Boolean = false) {

@@ -167,3 +167,6 @@ Selected storyboard export now creates one MP4 file per selected storyboard cell
 ## v0.2.52 — Storyboard export selection priority
 - Storyboard export mode now takes priority over any stale timeline range selection.
 - Switching storyboard mode clears the previous timeline range so only explicitly selected storyboard slides are exported.
+
+
+Version 0.2.77 adds a Crop button with centered crop-framing preview presets. This version only changes the player preview; crop-to-export is not implemented yet.
